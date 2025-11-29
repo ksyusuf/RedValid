@@ -69,7 +69,6 @@ class Reporter(BaseModel, table=True):
     full_name: str
     wallet_address: str = Field(index=True, unique=True)
     institution: Optional[str] = None
-    profile_photo: Optional[str] = None
     kyc_verified: bool = Field(default=False)
 
     # İlişki

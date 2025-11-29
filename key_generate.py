@@ -58,8 +58,6 @@ def main():
 STELLAR_SECRET=BURAYA_SECRET
 STELLAR_PUBLIC=BURAYA_PUBLIC
 
-STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
-STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
 """)
     print("3️⃣ Artık Stellar işlemleri göndermeye hazırsın! 🚀\n")
 

@@ -2,6 +2,8 @@ from fastapi import FastAPI, Depends, HTTPException, Body
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+import os
+from dotenv import load_dotenv
 
 from stellar_utils import (
     generate_data_hash,
@@ -30,7 +32,9 @@ import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-BASE_URL = "http://127.0.0.1:8000"
+# Load environment variables
+load_dotenv()
+BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8000")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -72,6 +76,24 @@ def create_reporter_endpoint(req: ReporterCreateRequest, session=Depends(get_ses
         kyc_verified=True  # MVP bypass
     )
     return create_reporter_record(session, reporter)
+
+@app.get("/reporters/{wallet_address}")
+def get_reporter_endpoint(wallet_address: str, session=Depends(get_session)):
+    """
+    Muhabir bilgilerini cüzdan adresi ile getir
+    """
+    reporter = get_reporter_by_wallet(session, wallet_address)
+    if not reporter:
+        raise HTTPException(404, "Muhabir bulunamadı.")
+    
+    return {
+        "id": reporter.id,
+        "full_name": reporter.full_name,
+        "wallet_address": reporter.wallet_address,
+        "institution": reporter.institution,
+        "kyc_verified": reporter.kyc_verified,
+        "created_at": reporter.created_at.isoformat()
+    }
 
 
 
