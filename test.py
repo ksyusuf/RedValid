@@ -42,7 +42,6 @@ video_url = "https://example.com/testvideo.mp4"
 prep_payload = {
     "reporter_wallet": PUBLIC_KEY,
     "video_url": video_url,
-    "keywords": ["test", "verification", "stellar"]
 }
 
 try:
