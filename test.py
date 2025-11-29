@@ -37,7 +37,7 @@ except Exception as e:
 # -------------------------
 print("📹 Step 2: Video hazırlanıyor...")
 
-video_url = "https://www.youtube.com/watch?v=PxAr1r-1EUA&list=RDPxAr1r-1EUA&index=1"
+video_url = "https://www.youtube.com/watch?v=hkERj1yxN6c"
 
 prep_payload = {
     "reporter_wallet": PUBLIC_KEY,

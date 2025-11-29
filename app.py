@@ -4,11 +4,13 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
+import base64
 
 from stellar_utils import (
     generate_data_hash,
     prepare_stellar_transaction,
-    submit_stellar_transaction
+    submit_stellar_transaction,
+    verify_transaction_on_blockchain,
 )
 
 from models import (
@@ -186,7 +188,7 @@ async def submit_verification(
         )
 
         if actual_hash:
-            updated_video = update_video_status(
+            update_video_status(
                 session,
                 video.id,
                 status="verified",
@@ -213,21 +215,45 @@ async def get_verification(req: VerificationRequest, session=Depends(get_session
     video = get_video_by_url(session, req.video_url)
     if not video:
         raise HTTPException(404, "Doğrulama kaydı bulunamadı.")
-
+        
     reporter = video.reporter
 
-    if video.status == "verified":
-        return {
-            "status": "VERIFIED ON STELLAR",
-            "video_url": video.video_url,
-            "reporter": {
-                "full_name": reporter.full_name,
-                "institution": reporter.institution,
-                "wallet_address": reporter.wallet_address
-            },
-            "data_hash_on_chain": video.data_hash,
-            "recorded_at": video.created_at.isoformat(),
-            "stellar_transaction_id": video.tx_hash
-        }
+    # Eğer video'nun bir tx_hash'i varsa blockchain'de kontrol et
+    if video.tx_hash:
+        tx = await verify_transaction_on_blockchain(video.tx_hash)
 
+        if tx:
+            memo_base64 = tx.get("memo")
+            memo_bytes = base64.b64decode(memo_base64)
+            memo_hex = memo_bytes.hex()
+            
+            # Transaction blockchain'de bulundu → video kesin kaydedilmiş
+            return {
+                "status": "VERIFIED_ON_STELLAR",
+                "video_url": video.video_url,
+                "memo_hex": memo_hex,
+                "data_hash": video.data_hash,
+                "reporter": {
+                    "full_name": reporter.full_name,
+                    "institution": reporter.institution,
+                    "wallet_address": reporter.wallet_address,
+                },
+                "recorded_at": video.created_at.isoformat(),
+                "stellar_transaction_id": video.tx_hash,
+                "stellar_ledger": tx.get("ledger"),
+                "stellar_created_at": tx.get("created_at"),
+                "stellar_operation_count": tx.get("operation_count"),
+                "blockchain_verified": True
+            }
+        else:
+            # Transaction henüz işlenmemiş olabilir
+            return {
+                "status": "PROCESSING_ON_BLOCKCHAIN",
+                "video_url": video.video_url,
+                "stellar_transaction_id": video.tx_hash,
+                "blockchain_verified": False,
+                "message": "Transaction Stellar blockchain'e gönderildi, henüz işlenmedi."
+            }
+
+    # Eğer daha hiç tx_hash yoksa → kullanıcıya mevcut local status'u döndür
     return {"status": video.status.upper()}

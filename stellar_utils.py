@@ -212,6 +212,22 @@ def prepare_stellar_transaction(
 
 
 # ---------------------
+# BLOCKCHAIN QUERY FUNCTIONS
+# ---------------------
+async def verify_transaction_on_blockchain(tx_hash: str) -> Optional[dict]:
+    """
+    Stellar blockchain'de transaction hash ile sorgulama yapar.
+    """
+    try:
+        tx = await asyncio.to_thread(
+            lambda: SERVER.transactions().transaction(tx_hash).call()
+            )
+        return tx  # bulunduysa dict benzeri response döner
+    except Exception:
+        return None
+
+    
+# ---------------------
 # TRANSACTION SUBMIT
 # ---------------------
 async def submit_stellar_transaction(
