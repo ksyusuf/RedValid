@@ -1,9 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, Body
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
-from typing import List
-from uuid import UUID
-import secrets
 from fastapi.middleware.cors import CORSMiddleware
 
 from stellar_utils import (
@@ -12,7 +9,13 @@ from stellar_utils import (
     submit_stellar_transaction
 )
 
-from models import Reporter
+from models import (
+    Reporter,
+    ReporterCreateRequest,
+    VideoPrepareRequest, 
+    SubmitTransactionRequest,
+    VerificationRequest
+)
 from db import (
     create_db_and_tables,
     get_session,
@@ -20,8 +23,7 @@ from db import (
     create_reporter_record,
     create_video_record,
     update_video_status,
-    get_video_by_slug,
-    add_keywords
+    get_video_by_url
 )
 import logging
 
@@ -55,26 +57,6 @@ app.add_middleware(
 
 
 # -------------------------------------------
-# Request modelleri
-# -------------------------------------------
-class ReporterCreateRequest(BaseModel):
-    full_name: str
-    wallet_address: str
-    institution: str | None = None
-
-
-class VideoPrepareRequest(BaseModel):
-    reporter_wallet: str
-    video_url: str
-    keywords: List[str]
-
-
-class SubmitTransactionRequest(BaseModel):
-    video_id: UUID
-    signed_xdr: str
-
-
-# -------------------------------------------
 # Muhabir Kaydı
 # -------------------------------------------
 @app.post("/reporters/")
@@ -103,8 +85,7 @@ def prepare_video_verification(req: VideoPrepareRequest, session=Depends(get_ses
         raise HTTPException(404, "Muhabir cüzdanı bulunamadı.")
 
     try:
-        public_slug = secrets.token_hex(4).upper()
-        data_hash = generate_data_hash(req.video_url, str(reporter.id), req.keywords)
+        data_hash = generate_data_hash(req.video_url, str(reporter.id))
         logger.info(f"Data hash üretildi: {data_hash}")
     except Exception as e:
         logger.error(f"Hash oluşturulamadı: {e}", exc_info=True)
@@ -126,13 +107,11 @@ def prepare_video_verification(req: VideoPrepareRequest, session=Depends(get_ses
             reporter_id=reporter.id,
             video_url=req.video_url,
             platform="unknown",
-            public_slug=public_slug,
             data_hash=data_hash,
             prepared_tx_hash=prepared_tx_hash,
             tx_hash=None,
             reporter_wallet=reporter.wallet_address
         )
-        add_keywords(session, video_id=video.id, keywords=req.keywords)
         logger.info(f"Video kaydedildi: {video.id}")
     except Exception as e:
         logger.error(f"Veritabanına kaydedilemedi: {e}", exc_info=True)
@@ -142,8 +121,6 @@ def prepare_video_verification(req: VideoPrepareRequest, session=Depends(get_ses
         "message": "İşlem imzaya hazır.",
         "video_id": video.id,
         "video_url": video.video_url,
-        "keywords": [k.keyword for k in video.keywords],
-        "public_slug": video.public_slug,
         "data_hash": video.data_hash,
         "xdr_for_signing": xdr_base64,
         "prepared_tx_hash": prepared_tx_hash
@@ -180,7 +157,6 @@ async def submit_verification(
             return {
                 "status": "success",
                 "stellar_tx_hash": actual_hash,
-                "verification_link": f"{BASE_URL}/verify/{updated_video.public_slug}"
             }
 
         update_video_status(session, video.id, status="failed")
@@ -194,13 +170,12 @@ async def submit_verification(
 # -------------------------------------------
 # Public Verify Endpoint
 # -------------------------------------------
-@app.get("/verify/{public_slug}")
-async def get_verification(public_slug: str, session=Depends(get_session)):
-    video = get_video_by_slug(session, public_slug)
+@app.post("/verify")
+async def get_verification(req: VerificationRequest, session=Depends(get_session)):
+    video = get_video_by_url(session, req.video_url)
     if not video:
         raise HTTPException(404, "Doğrulama kaydı bulunamadı.")
 
-    keywords = [k.keyword for k in video.keywords]
     reporter = video.reporter
 
     if video.status == "verified":
@@ -214,7 +189,6 @@ async def get_verification(public_slug: str, session=Depends(get_session)):
             },
             "data_hash_on_chain": video.data_hash,
             "recorded_at": video.created_at.isoformat(),
-            "keywords": keywords,
             "stellar_transaction_id": video.tx_hash
         }
 

@@ -1,8 +1,7 @@
 # db.py
 from sqlmodel import SQLModel, Session, create_engine, select
 from uuid import UUID
-
-from models import Reporter, Video, Keyword
+from models import Reporter, Video
 
 
 sqlite_file_name = "database.db"
@@ -54,12 +53,11 @@ def set_reporter_kyc_verified(session: Session, reporter_id: UUID, value: bool =
 # ----------------------------
 # CRUD: Video
 # ----------------------------
-def create_video_record(session, reporter_id, video_url, platform, public_slug, data_hash, prepared_tx_hash=None, tx_hash=None, reporter_wallet=None):
+def create_video_record(session, reporter_id, video_url, platform, data_hash, prepared_tx_hash=None, tx_hash=None, reporter_wallet=None):
     video = Video(
         reporter_id=reporter_id,
         video_url=video_url,
         platform=platform,
-        public_slug=public_slug,
         data_hash=data_hash,
         prepared_tx_hash=prepared_tx_hash,
         tx_hash=tx_hash,
@@ -113,16 +111,7 @@ def mark_video_verified(
     return video
 
 
-def get_video_by_slug(session: Session, slug: str) -> Video | None:
+def get_video_by_url(session: Session, url: str) -> Video | None:
     return session.exec(
-        select(Video).where(Video.public_slug == slug)
+        select(Video).where(Video.video_url == url)
     ).first()
-
-
-# ----------------------------
-# CRUD: Keyword
-# ----------------------------
-def add_keywords(session: Session, *, video_id: UUID, keywords: list[str]):
-    for kw in keywords:
-        session.add(Keyword(keyword=kw, video_id=video_id))
-    session.commit()

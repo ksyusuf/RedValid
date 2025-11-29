@@ -66,12 +66,11 @@ def mark_transaction_submitted(prepared_tx_hash: str, horizon_tx_hash: str, ledg
 # ---------------------
 # HASH GENERATION
 # ---------------------
-def generate_data_hash(video_url: str, reporter_id: str, keywords: List[str]) -> str:
+def generate_data_hash(video_url: str, reporter_id: str) -> str:
     """
-    Video URL + Reporter ID + Keywords → SHA256 Hash (hex).
-    Deterministik: keywords sorted.
+    Video URL + Reporter ID → SHA256 Hash (hex).
     """
-    data_string = f"{video_url}:{reporter_id}:{','.join(sorted(keywords))}"
+    data_string = f"{video_url}:{reporter_id}"
     return hashlib.sha256(data_string.encode("utf-8")).hexdigest()
 
 
@@ -174,7 +173,7 @@ def prepare_stellar_transaction(
     builder = TransactionBuilder(
         source_account=account,
         network_passphrase=NETWORK_PASSPHRASE,
-        base_fee=100  # not: base_fee dinamik alınmayacak (isteğin üzerine)
+        base_fee=100
     )
 
     # Payment operation: source=reporter_public_key -> muhabirin imzası gerekecek
