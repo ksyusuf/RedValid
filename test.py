@@ -37,7 +37,7 @@ except Exception as e:
 # -------------------------
 print("📹 Step 2: Video hazırlanıyor...")
 
-video_url = "https://example.com/testvideo.mp4"
+video_url = "https://www.youtube.com/watch?v=PxAr1r-1EUA&list=RDPxAr1r-1EUA&index=1"
 
 prep_payload = {
     "reporter_wallet": PUBLIC_KEY,
@@ -48,6 +48,16 @@ try:
     resp = requests.post(f"{BACKEND_URL}/videos/prepare-transaction", json=prep_payload)
     resp.raise_for_status()
     prep_data = resp.json()
+    
+    # Check if video URL already exists
+    if prep_data.get("already_registered"):
+        print("❌ TEST DURDURULDU: Video URL'si zaten kayıtlı!")
+        print(f"   Message: {prep_data.get('message')}")
+        print(f"   Video ID: {prep_data.get('video_id')}")
+        print(f"   Status: {prep_data.get('status')}")
+        print("\n💡 Test veritabanı temizlenmeli veya farklı video URL kullanılmalı.")
+        exit(1)
+    
     print("✅ Video hazırlandı:", prep_data)
 except Exception as e:
     print("❌ Prepare transaction hatası:", e)

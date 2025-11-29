@@ -84,6 +84,20 @@ def prepare_video_verification(req: VideoPrepareRequest, session=Depends(get_ses
         logger.warning(f"Muhabir bulunamadı: {req.reporter_wallet}")
         raise HTTPException(404, "Muhabir cüzdanı bulunamadı.")
 
+    # Check if video URL already exists
+    existing_video = get_video_by_url(session, req.video_url)
+    if existing_video:
+        logger.info(f"Video URL already exists: {req.video_url}")
+        return {
+            "message": "Bu video URL'si zaten kayıtlı.",
+            "video_id": existing_video.id,
+            "video_url": existing_video.video_url,
+            "status": existing_video.status,
+            "data_hash": existing_video.data_hash,
+            "prepared_tx_hash": existing_video.prepared_tx_hash,
+            "already_registered": True
+        }
+
     try:
         data_hash = generate_data_hash(req.video_url, str(reporter.id))
         logger.info(f"Data hash üretildi: {data_hash}")
@@ -112,6 +126,7 @@ def prepare_video_verification(req: VideoPrepareRequest, session=Depends(get_ses
             tx_hash=None,
             reporter_wallet=reporter.wallet_address
         )
+
         logger.info(f"Video kaydedildi: {video.id}")
     except Exception as e:
         logger.error(f"Veritabanına kaydedilemedi: {e}", exc_info=True)
@@ -123,7 +138,8 @@ def prepare_video_verification(req: VideoPrepareRequest, session=Depends(get_ses
         "video_url": video.video_url,
         "data_hash": video.data_hash,
         "xdr_for_signing": xdr_base64,
-        "prepared_tx_hash": prepared_tx_hash
+        "prepared_tx_hash": prepared_tx_hash,
+        "already_registered": False
     }
 
 
