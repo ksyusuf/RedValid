@@ -161,6 +161,57 @@ export const uploadVideoFromFile = async (reporter_wallet, video_file) => {
 };
 
 /**
+ * Video dosyası ile sorgulama yapar
+ * @param {File} video_file - Video dosyası
+ * @returns {Promise<Object>} Sorgulama sonucu
+ */
+export const queryVideoFromFile = async (video_file) => {
+  try {
+    if (!video_file) {
+      throw new Error('Video dosyası seçilmedi.');
+    }
+
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (video_file.size > maxSize) {
+      throw new Error('Video dosyası 50MB\'dan büyük olamaz.');
+    }
+
+    const formData = new FormData();
+    formData.append('video_file', video_file);
+
+    console.log('Dosya ile sorgulama başlatılıyor:', {
+      video_file: video_file.name,
+      fileSize: video_file.size
+    });
+
+    const response = await api.post('/verify/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 60000, // 60 saniye timeout
+    });
+
+    console.log('Dosya ile sorgulama başarılı:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Dosya ile sorgulama hatası:', error);
+
+    // Özel hata mesajları
+    if (error.code === 'ECONNABORTED') {
+      throw new Error('İstek zaman aşımına uğradı. Lütfen daha küçük bir dosya deneyin.');
+    } else if (error.response?.status === 413) {
+      throw new Error('Video dosyası çok büyük.');
+    } else if (error.response?.status === 415) {
+      throw new Error('Desteklenmeyen dosya formatı. Lütfen video dosyası seçin.');
+    } else if (error.response?.status === 400) {
+      throw new Error(error.response.data?.detail || 'Geçersiz video dosyası.');
+    }
+
+    throw error;
+  }
+};
+
+/**
  * İmzalanmış transaction'ı gönderir
  * @param {number} videoId - Video ID'si
  * @param {string} signedXdr - İmzalanmış XDR
