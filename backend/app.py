@@ -2,9 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, Body, UploadFile, File
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-import os
 import io
-from dotenv import load_dotenv
 import base64
 
 from stellar_utils import (
@@ -22,25 +20,22 @@ from models import (
     ReporterCreateRequest,
     VideoPrepareRequest, 
     SubmitTransactionRequest,
-    VerificationRequest
+    VerificationRequest,
 )
 from db import (
     create_db_and_tables,
     get_session,
     get_reporter_by_wallet,
     create_reporter_record,
-    create_video_record,
     update_video_status,
-    get_video_by_url
+    get_video_by_url,
+    get_video_by_data_hash
 )
 import logging
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Load environment variables
-load_dotenv()
-BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8000")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -129,10 +124,12 @@ async def prepare_video_verification(
 
 @app.post("/videos/prepare-transaction/upload")
 async def prepare_video_verification_with_upload(
-    reporter_wallet: str,
     video_file: UploadFile = File(...),
+    reporter_wallet: str = None,
     session=Depends(get_session)
     ):
+    print(reporter_wallet)
+    print(video_file)
     logger.info(f"Video upload request geldi: File={video_file.filename} - {reporter_wallet}")
 
     reporter = get_reporter_by_wallet(session, reporter_wallet)
@@ -149,6 +146,13 @@ async def prepare_video_verification_with_upload(
         video_file_like = io.BytesIO(video_content)
         
         data_hash = generate_hash_from_video_file(video_file_like, session)
+        
+        # Handle the case where data_hash is a dict (video already exists)
+        if isinstance(data_hash, dict):
+            # Video already exists, return the existing record
+            return data_hash
+        
+        # data_hash is a string, proceed with normal processing
         video_identifier = f"uploaded_video_{data_hash[:16]}"
         return process_video_preparation(
             session=session,
@@ -252,3 +256,131 @@ async def get_verification(req: VerificationRequest, session=Depends(get_session
 
     # Eğer daha hiç tx_hash yoksa → kullanıcıya mevcut local status'u döndür
     return {"status": video.status.upper()}
+
+
+# -------------------------------------------
+# Data Hash Check Endpoint
+# -------------------------------------------
+@app.post("/verify/upload")
+async def check_data_hash_existence(
+    video_file: UploadFile = File(...),
+    session=Depends(get_session)
+):
+    """
+    Dosya yükleyerek data_hash oluşturup, veritabanında ve zincirde varlığını kontrol eder.
+    """
+    logger.info(f"Data hash check request geldi: File={video_file.filename}")
+    
+    if not video_file:
+        raise HTTPException(400, "Video dosyası boş.")
+    
+    try:
+        # 1. Dosyayı oku ve data_hash oluştur
+        video_content = await video_file.read()
+        video_file_like = io.BytesIO(video_content)
+        
+        # Hash oluştur
+        data_hash = generate_hash_from_video_file(video_file_like, session)
+        
+        # Eğer hash zaten mevcutsa dict döndü, string döndüyse yeni hash
+        if isinstance(data_hash, dict):
+            existing_video = data_hash
+            logger.info(f"Video hash already exists: {data_hash['data_hash']}")
+            
+            # Get reporter information
+            video_record = get_video_by_data_hash(session, existing_video['data_hash'])
+            reporter = None
+            if video_record:
+                reporter = session.get(Reporter, video_record.reporter_id)
+            
+            # Blockchain durumunu kontrol et
+            blockchain_status = None
+            if existing_video.get('prepared_tx_hash'):
+                tx = await verify_transaction_on_blockchain(existing_video['prepared_tx_hash'])
+                if tx:
+                    blockchain_status = "VERIFIED_ON_STELLAR"
+                else:
+                    blockchain_status = "PREPARED_NOT_SUBMITTED"
+            else:
+                blockchain_status = "NOT_ON_BLOCKCHAIN"
+            
+            return {
+                "status": "ALREADY_EXISTS",
+                "data_hash": existing_video['data_hash'],
+                "database_status": existing_video['status'],
+                "blockchain_status": blockchain_status,
+                "video_info": {
+                    "video_id": existing_video['video_id'],
+                    "video_url": existing_video['video_url'],
+                    "prepared_tx_hash": existing_video['prepared_tx_hash']
+                },
+                "reporter_info": {
+                    "reporter_id": str(reporter.id),
+                    "full_name": reporter.full_name,
+                    "wallet_address": reporter.wallet_address,
+                    "institution": reporter.institution,
+                    "kyc_verified": reporter.kyc_verified
+                } if reporter else None,
+                "message": "Bu video zaten kayıtlı."
+            }
+        
+        # 2. Yeni hash, veritabanında ara
+        data_hash_str = data_hash  # string olarak hash al
+        logger.info(f"Generated new data hash: {data_hash_str}")
+        
+        # Veritabanında ara
+        existing_video = get_video_by_data_hash(session, data_hash_str)
+        
+        if existing_video:
+            logger.info(f"Data hash found in database: {data_hash_str}")
+            
+            # Get reporter information
+            reporter = session.get(Reporter, existing_video.reporter_id)
+            
+            # Blockchain durumunu kontrol et
+            blockchain_status = None
+            if existing_video.tx_hash:
+                tx = await verify_transaction_on_blockchain(existing_video.tx_hash)
+                if tx:
+                    blockchain_status = "VERIFIED_ON_STELLAR"
+                else:
+                    blockchain_status = "SUBMITTED_PROCESSING"
+            else:
+                blockchain_status = "NOT_ON_BLOCKCHAIN"
+            
+            return {
+                "status": "EXISTS_IN_DATABASE",
+                "data_hash": data_hash_str,
+                "database_status": existing_video.status,
+                "blockchain_status": blockchain_status,
+                "video_info": {
+                    "video_id": str(existing_video.id),
+                    "video_url": existing_video.video_url,
+                    "prepared_tx_hash": existing_video.prepared_tx_hash,
+                    "tx_hash": existing_video.tx_hash
+                },
+                "reporter_info": {
+                    "reporter_id": str(reporter.id),
+                    "full_name": reporter.full_name,
+                    "wallet_address": reporter.wallet_address,
+                    "institution": reporter.institution,
+                    "kyc_verified": reporter.kyc_verified
+                } if reporter else None,
+                "message": "Bu video veritabanında mevcut."
+            }
+        
+        # 3. Veritabanında yok, blockchain'de ara (opsiyonel - hash ile arama mümkünse)
+        # Not: Stellar blockchain'de doğrudan hash ile arama yapmak mümkün değil
+        # Bu nedenle bu adımı atlayıp "NOT_FOUND" dönebiliriz
+        
+        return {
+            "status": "NOT_FOUND",
+            "data_hash": data_hash_str,
+            "database_status": "NOT_EXISTS",
+            "blockchain_status": "UNKNOWN",
+            "message": "Bu video hiçbir yerde bulunamadı. Yeni kayıt oluşturulabilir."
+        }
+        
+    except Exception as e:
+        logger.error(f"Data hash check error: {e}")
+        raise HTTPException(400, f"Data hash check error: {e}")

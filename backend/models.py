@@ -60,6 +60,17 @@ class VerificationRequest(BaseModel):
         }
 
 
+class DataHashCheckRequest(BaseModel):
+    video_file: str = None  # Base64 encoded video file
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "video_file": "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAACKBtZGF0AAAC..."
+            }
+        }
+
+
 # --- Temel Model Yapısı ---
 class BaseModel(SQLModel):
     id: UUID = Field(default_factory=uuid4, primary_key=True)

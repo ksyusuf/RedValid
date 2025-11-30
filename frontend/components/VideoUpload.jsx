@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { uploadVideoFromUrl, uploadVideoFromFile, submitTransaction } from '../services/api';
-import { getWalletAddress, autoConnectWallet, disconnectWallet } from '../services/wallet';
+import { uploadVideoFromUrl, uploadVideoFromFile, submitTransaction, getReporter, createReporter } from '../services/api';
+import { getWalletAddress, autoConnectWallet, disconnectWallet, checkWalletConnection } from '../services/wallet';
 import { signTransaction } from '@stellar/freighter-api';
 import './VideoUpload.css';
 
@@ -9,18 +9,73 @@ const VideoUpload = () => {
   const [videoUrl, setVideoUrl] = useState('');
   const [videoFile, setVideoFile] = useState(null);
   const [fullName, setFullName] = useState('');
+  const [institution, setInstitution] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [error, setError] = useState(null);
   const [connecting, setConnecting] = useState(false);
+  const [autoCheckingConnection, setAutoCheckingConnection] = useState(true);
   const [uploadType, setUploadType] = useState('url'); // 'url' veya 'file'
+  const [preparingHash, setPreparingHash] = useState(false);
+  const [signingTransaction, setSigningTransaction] = useState(false);
+  const [registeringUser, setRegisteringUser] = useState(false);
+  const [existingUserData, setExistingUserData] = useState(null);
+  const [isExistingUser, setIsExistingUser] = useState(false);
+  const [userRegistered, setUserRegistered] = useState(false);
+
+  // Kullanıcı verilerini cüzdan adresinden getir
+  const fetchUserData = async (address) => {
+    try {
+      const reporterData = await getReporter(address);
+      if (reporterData) {
+        setExistingUserData(reporterData);
+        setIsExistingUser(true);
+        setUserRegistered(true);
+        setFullName(reporterData.full_name);
+        setInstitution(reporterData.institution || '');
+        console.log('Kullanıcı verileri bulundu:', reporterData);
+      }
+    } catch (error) {
+      // Kullanıcı bulunamadı, yeni kullanıcı
+      console.log('Kullanıcı verisi bulunamadı, yeni kullanıcı:', error.message);
+      setIsExistingUser(false);
+      setUserRegistered(false);
+      setExistingUserData(null);
+    }
+  };
+
+  // Component mount edildiğinde otomatik cüzdan bağlantısı kontrol et
+  useEffect(() => {
+    const checkConnectionOnLoad = async () => {
+      try {
+        const address = await checkWalletConnection();
+        if (address) {
+          setWalletAddress(address);
+          await fetchUserData(address);
+          console.log('Otomatik cüzdan bağlantısı başarılı:', address);
+        }
+      } catch (error) {
+        console.log('Otomatik cüzdan bağlantısı başarısız:', error);
+        // Hata durumunda sessizce devam et, kullanıcı manuel bağlanabilir
+      } finally {
+        setAutoCheckingConnection(false);
+      }
+    };
+
+    checkConnectionOnLoad();
+  }, []);
 
   const handleConnect = async () => {
     setConnecting(true);
+    setAutoCheckingConnection(false);
     setError(null);
     try {
       const address = await getWalletAddress();
       setWalletAddress(address);
+      
+      // Kullanıcı verilerini getir
+      await fetchUserData(address);
+      
     } catch (err) {
       console.error('Wallet connection error:', err);
       
@@ -43,11 +98,73 @@ const VideoUpload = () => {
     disconnectWallet();
     setWalletAddress(null);
     setUploadResult(null);
+    setFullName('');
+    setInstitution('');
+    setExistingUserData(null);
+    setIsExistingUser(false);
+    setUserRegistered(false);
+  };
+
+  // Kullanıcı kaydı işlemi
+  const handleRegisterUser = async () => {
+    if (!fullName.trim()) {
+      setError('Lütfen adınızı girin.');
+      return;
+    }
+
+    setRegisteringUser(true);
+    setError(null);
+
+    try {
+      console.log('Kullanıcı kaydı oluşturuluyor...');
+      const newReporter = await createReporter(fullName, walletAddress, institution);
+      console.log('Kullanıcı kaydı başarılı:', newReporter);
+      
+      // Kullanıcıyı mevcut kullanıcı olarak işaretle
+      setExistingUserData(newReporter);
+      setIsExistingUser(true);
+      setUserRegistered(true);
+
+      setRegisteringUser(false);
+      
+    } catch (reporterError) {
+      console.error('Kullanıcı kaydı başarısız:', reporterError);
+      setRegisteringUser(false);
+      
+      // Backend'den gelen hatayı parse et
+      let errorMessage = 'Kullanıcı kaydı oluşturulamadı.';
+      if (reporterError.response?.data) {
+        const responseData = reporterError.response.data;
+        if (responseData.detail) {
+          if (Array.isArray(responseData.detail)) {
+            errorMessage = responseData.detail.map(item => 
+              typeof item === 'string' ? item : 
+              item.msg || item.message || JSON.stringify(item)
+            ).join(', ');
+          } else if (typeof responseData.detail === 'string') {
+            errorMessage = responseData.detail;
+          }
+        } else {
+          errorMessage = typeof responseData === 'string' ? responseData : 
+                        JSON.stringify(responseData);
+        }
+      } else if (reporterError.message) {
+        errorMessage = reporterError.message;
+      }
+      
+      setError(errorMessage);
+    }
   };
 
   const handleUpload = async () => {
     if (!walletAddress) {
       setError('Lütfen önce cüzdanınıza bağlanın.');
+      return;
+    }
+
+    // Kullanıcı kaydı kontrolü
+    if (!userRegistered) {
+      setError('Lütfen önce kullanıcı kaydınızı oluşturun.');
       return;
     }
 
@@ -63,12 +180,18 @@ const VideoUpload = () => {
     }
 
     setLoading(true);
+    setPreparingHash(true);
+    setSigningTransaction(false);
+    setRegisteringUser(false);
     setError(null);
     setUploadResult(null);
 
     try {
       let uploadData;
 
+      // ----------- PREPARING PHASE -----------
+      setPreparingHash(true);
+      
       if (uploadType === 'url') {
         // -----------  URL YÜKLEME  -----------
         console.log('URL yükleme başlatılıyor:', videoUrl);
@@ -81,7 +204,28 @@ const VideoUpload = () => {
         uploadData = await uploadVideoFromFile(walletAddress, videoFile);
       }
 
+      // Yeni kullanıcı için fullName bilgisini kaydet (varsa)
+      if (!isExistingUser && fullName.trim()) {
+        console.log('Yeni kullanıcı tespit edildi, fullName kaydedilecek:', fullName);
+      }
+
       setUploadResult(uploadData);
+
+      // ----------- KAYITLI VİDEO KONTROLÜ -----------
+      if (uploadData.already_registered) {
+        // Video zaten kayıtlı, işlem tamamlandı
+        console.log('Video zaten kayıtlı, işlem durduruluyor');
+        setPreparingHash(false);
+        setUploadResult({
+          ...uploadData,
+          signed: true, // Zaten kayıtlı olduğu için imzalanmış olarak işaretle
+          video_url: uploadType === 'url' ? videoUrl : uploadData.video_url,
+          file_name: uploadType === 'file' ? videoFile.name : null,
+          owner_wallet: walletAddress,
+          message: uploadData.message || 'Bu video zaten kayıtlı.'
+        });
+        return; // İşlemi burada sonlandır
+      }
 
       // ----------- XDR VALİDASYON -----------
       if (!uploadData.xdr_for_signing || typeof uploadData.xdr_for_signing !== 'string') {
@@ -91,7 +235,10 @@ const VideoUpload = () => {
       console.log('XDR length:', uploadData.xdr_for_signing.length);
       console.log('XDR starts with:', uploadData.xdr_for_signing.substring(0, 20) + '...');
 
-      // ----------- XDR İMZALAMA -----------
+      // ----------- SIGNING PHASE -----------
+      setPreparingHash(false);
+      setSigningTransaction(true);
+      
       console.log('Wallet address:', walletAddress);
       
       let signedXdr;
@@ -101,8 +248,10 @@ const VideoUpload = () => {
           accountToSign: walletAddress
         });
         console.log('XDR signing successful, signed XDR length:', signedXdr?.length);
+        setSigningTransaction(false);
       } catch (signError) {
         console.error('XDR signing failed:', signError);
+        setSigningTransaction(false);
         
         // Eğer imzalama başarısız olursa, kullanıcıya özel mesaj göster
         if (signError.message?.includes('internal error')) {
@@ -127,19 +276,53 @@ const VideoUpload = () => {
         file_name: uploadType === 'file' ? videoFile.name : null,
         owner_wallet: walletAddress
       });
+      console.log('Transaction submission successful:', uploadResult);
 
     } catch (err) {
       console.error('Upload error:', err);
+      setPreparingHash(false);
+      setSigningTransaction(false);
+      setRegisteringUser(false);
       
-      // Freighter wallet hataları için özel mesajlar
-      if (err.message?.includes('internal error') || err.message?.includes('wallet encountered')) {
+      let errorMessage = 'Bir hata oluştu.';
+      
+      // Backend'den gelen hatayı parse et
+      if (err.response?.data) {
+        const responseData = err.response.data;
+        
+        // FastAPI validation error format
+        if (responseData.detail) {
+          if (Array.isArray(responseData.detail)) {
+            // Validation error array
+            errorMessage = responseData.detail.map(item => 
+              typeof item === 'string' ? item : 
+              item.msg || item.message || JSON.stringify(item)
+            ).join(', ');
+          } else if (typeof responseData.detail === 'string') {
+            errorMessage = responseData.detail;
+          } else if (typeof responseData.detail === 'object') {
+            // Object format validation error
+            errorMessage = responseData.detail.msg || responseData.detail.message || 
+                          JSON.stringify(responseData.detail);
+          }
+        } else {
+          // Response data'yı string'e çevir
+          errorMessage = typeof responseData === 'string' ? responseData : 
+                        JSON.stringify(responseData);
+        }
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      // Freighter wallet hataları için özel mesajlar (önce kontrol et)
+      if (errorMessage.includes('internal error') || errorMessage.includes('wallet encountered')) {
         setError('Freighter cüzdanında bir hata oluştu. Lütfen cüzdan eklentisini yenileyin ve tekrar deneyin.');
-      } else if (err.message?.includes('User rejected')) {
+      } else if (errorMessage.includes('User rejected') || errorMessage.includes('reddedildi')) {
         setError('İşlem cüzdan tarafından reddedildi. Tekrar denemek için butona tıklayın.');
-      } else if (err.message?.includes('not connected') || err.message?.includes('bağlı değil')) {
+      } else if (errorMessage.includes('not connected') || errorMessage.includes('bağlı değil')) {
         setError('Cüzdan bağlantısı kesildi. Lütfen önce tekrar bağlanın.');
       } else {
-        setError(err.response?.data?.detail || err.message || 'Bir hata oluştu.');
+        setError(errorMessage);
       }
     } finally {
       setLoading(false);
@@ -154,7 +337,14 @@ const VideoUpload = () => {
       </p>
 
       {/* ------------ CÜZDAN BAĞLANTISI ------------ */}
-      {!walletAddress ? (
+      {autoCheckingConnection ? (
+        <div className="connect-section">
+          <div className="checking-connection">
+            <div className="loading-spinner"></div>
+            <p>Cüzdan bağlantısı kontrol ediliyor...</p>
+          </div>
+        </div>
+      ) : !walletAddress ? (
         <div className="connect-section">
           <button
             onClick={handleConnect}
@@ -178,40 +368,117 @@ const VideoUpload = () => {
           {/* ------------ FORM ------------ */}
           <div className="upload-form">
 
-            {/* YÜKLEME TİPİ SEÇİMİ */}
-            <div className="form-group">
-              <label>Yükleme Tipi:</label>
-              <div className="upload-type-selection">
-                <label className={`upload-type-option ${uploadType === 'url' ? 'active' : ''}`}>
+            {/* KULLANICI KAYIT BÖLÜMÜ - Sadece kayıtlı olmayan kullanıcılar için */}
+            {!userRegistered && (
+              <div className="user-info-section">
+                <h3>👤 Kullanıcı Kaydı</h3>
+                <p className="user-info-text">Bu cüzdan adresi ile ilk kez kayıt oluyorsunuz. Lütfen bilgilerinizi girin:</p>
+                
+                <div className="form-group">
+                  <label htmlFor="fullName">Tam Ad *</label>
                   <input
-                    type="radio"
-                    name="uploadType"
-                    value="url"
-                    checked={uploadType === 'url'}
-                    onChange={(e) => {
-                      setUploadType(e.target.value);
-                      setVideoFile(null);
-                      setVideoUrl('');
-                    }}
+                    id="fullName"
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    className="form-input"
+                    placeholder="Adınızı ve soyadınızı girin"
+                    required
                   />
-                  <span>🔗 Video URL'si</span>
-                </label>
-                <label className={`upload-type-option ${uploadType === 'file' ? 'active' : ''}`}>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="institution">Kurum (Opsiyonel)</label>
                   <input
-                    type="radio"
-                    name="uploadType"
-                    value="file"
-                    checked={uploadType === 'file'}
-                    onChange={(e) => {
-                      setUploadType(e.target.value);
-                      setVideoFile(null);
-                      setVideoUrl('');
-                    }}
+                    id="institution"
+                    type="text"
+                    value={institution}
+                    onChange={(e) => setInstitution(e.target.value)}
+                    className="form-input"
+                    placeholder="Çalıştığınız kurum veya serbest çalışıyorsanız boş bırakabilirsiniz"
                   />
-                  <span>📁 Video Dosyası</span>
-                </label>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="walletAddress">Cüzdan Adresi</label>
+                  <input
+                    id="walletAddress"
+                    type="text"
+                    value={walletAddress}
+                    disabled
+                    className="form-input disabled"
+                    placeholder="Cüzdan adresiniz"
+                  />
+                </div>
+
+                {/* KAYIT BUTONU */}
+                <button
+                  onClick={handleRegisterUser}
+                  disabled={registeringUser || !fullName.trim()}
+                  className="register-button"
+                >
+                  {registeringUser ? 'Kayıt Oluşturuluyor...' : 'Kullanıcı Kaydı Oluştur'}
+                </button>
               </div>
-            </div>
+            )}
+
+            {/* MEVCUT KULLANICI BİLGİLERİ - Sadece kayıtlı kullanıcılar için */}
+            {userRegistered && isExistingUser && existingUserData && (
+              <div className="user-info-section">
+                <h3>✓ Kayıtlı Kullanıcı</h3>
+                <div className="existing-user-info">
+                  <p className="user-info-text">
+                    <strong>Ad:</strong> {existingUserData.full_name}
+                  </p>
+                  {existingUserData.institution && (
+                    <p className="user-info-text">
+                      <strong>Kurum:</strong> {existingUserData.institution}
+                    </p>
+                  )}
+                  <p className="user-info-text">
+                    <strong>Cüzdan:</strong> {walletAddress.substring(0, 8)}...{walletAddress.substring(walletAddress.length - 8)}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* VİDEO YÜKLEME BÖLÜMÜ - Sadece kayıtlı kullanıcılar için */}
+            {userRegistered && (
+              <>
+                {/* YÜKLEME TİPİ SEÇİMİ */}
+                <div className="form-group">
+                  <label>Yükleme Tipi:</label>
+                  <div className="upload-type-selection">
+                    <label className={`upload-type-option ${uploadType === 'url' ? 'active' : ''}`}>
+                      <input
+                        type="radio"
+                        name="uploadType"
+                        value="url"
+                        checked={uploadType === 'url'}
+                        onChange={(e) => {
+                          setUploadType(e.target.value);
+                          setVideoFile(null);
+                          setVideoUrl('');
+                        }}
+                      />
+                      <span>🔗 Video URL'si</span>
+                    </label>
+                    <label className={`upload-type-option ${uploadType === 'file' ? 'active' : ''}`}>
+                      <input
+                        type="radio"
+                        name="uploadType"
+                        value="file"
+                        checked={uploadType === 'file'}
+                        onChange={(e) => {
+                          setUploadType(e.target.value);
+                          setVideoFile(null);
+                          setVideoUrl('');
+                        }}
+                      />
+                      <span>📁 Video Dosyası</span>
+                    </label>
+                  </div>
+                </div>
 
             {/* URL YÜKLEME */}
             {uploadType === 'url' && (
@@ -245,14 +512,77 @@ const VideoUpload = () => {
               </div>
             )}
 
-            {/* YÜKLEME BUTONU */}
-            <button
-              onClick={handleUpload}
-              disabled={loading}
-              className="upload-button"
-            >
-              {loading ? 'Yükleniyor...' : `${uploadType === 'url' ? 'URL\'den' : 'Dosyadan'} Video Yükle ve Zincire Kaydet`}
-            </button>
+            {/* YÜKLEME BUTONU VE LOADING STATES */}
+            {!preparingHash && !signingTransaction && !registeringUser && (
+              <button
+                onClick={handleUpload}
+                disabled={loading}
+                className="upload-button"
+              >
+                {loading ? 'Yükleniyor...' : `${uploadType === 'url' ? 'URL\'den' : 'Dosyadan'} Video Yükle ve Zincire Kaydet`}
+              </button>
+            )}
+
+            {/* PREPARING HASH STATE */}
+            {preparingHash && (
+              <div className="loading-state">
+                <div className="cool-spinner preparing-spinner"></div>
+                <div className="loading-text">
+                  <h4>🔐 Hash Hazırlanıyor</h4>
+                  <p>Video hash'i oluşturulup blockchain'e hazırlanıyor...</p>
+                  <div className="progress-dots">
+                    <span className="dot active"></span>
+                    <span className="dot"></span>
+                    <span className="dot"></span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SIGNING TRANSACTION STATE */}
+            {signingTransaction && (
+              <div className="loading-state">
+                <div className="cool-spinner signing-spinner"></div>
+                <div className="loading-text">
+                  <h4>✍️ İşlem İmzalanıyor</h4>
+                  <p>Freighter cüzdanınızda işlemi imzalayın...</p>
+                  <div className="progress-dots">
+                    <span className="dot completed"></span>
+                    <span className="dot active"></span>
+                    <span className="dot"></span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* REGISTERING USER STATE */}
+            {registeringUser && (
+              <div className="loading-state">
+                <div className="cool-spinner registering-spinner"></div>
+                <div className="loading-text">
+                  <h4>👤 Kullanıcı Kaydı</h4>
+                  <p>Kullanıcı bilgileriniz sisteme kaydediliyor...</p>
+                  <div className="progress-dots">
+                    <span className="dot completed"></span>
+                    <span className="dot completed"></span>
+                    <span className="dot active"></span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* GENERAL LOADING STATE */}
+            {loading && !preparingHash && !signingTransaction && !registeringUser && (
+              <div className="loading-state">
+                <div className="cool-spinner upload-spinner"></div>
+                <div className="loading-text">
+                  <h4>📤 Yükleniyor</h4>
+                  <p>Video işleniyor, lütfen bekleyin...</p>
+                </div>
+              </div>
+            )}
+              </>
+            )}
           </div>
         </div>
       )}
@@ -264,18 +594,46 @@ const VideoUpload = () => {
 
       {/* ------------ SONUÇ ------------ */}
       {uploadResult && (
-        <div className={`result-container ${uploadResult.signed ? 'success' : 'pending'}`}>
+        <div className={`result-container ${uploadResult.already_registered ? 'already-registered' : (uploadResult.signed ? 'success' : 'pending')}`}>
           <h3>
-            {uploadResult.signed ? '✓ Video Başarıyla Zincire Kaydedildi' : '⚠ İmzalanıyor...'}
+            {uploadResult.already_registered 
+              ? '🟠 Video Zaten Zincirde Kayıtlı' 
+              : (uploadResult.signed ? '✓ Video Başarıyla Zincire Kaydedildi' : '⚠ İmzalanıyor...')}
           </h3>
 
           {uploadResult.signed ? (
             <div className="success-details">
-              <p className="success-message">{uploadResult.message}</p>
+              {uploadResult.already_registered ? (
+                <div className="already-registered-info">
+                  <p className="success-message">
+                    <strong>🟠 Bu video zaten Stellar blockchain'inde kayıtlı!</strong><br/>
+                    {uploadResult.message || 'Video daha önce zincire kaydedilmiş ve doğrulanmış durumda.'}
+                  </p>
+                  <div className="detail-item">
+                    <strong>📊 Durum:</strong> 
+                    <span className="status-badge already-registered">
+                      ✓ Zincirde Kayıtlı ve Doğrulanmış
+                    </span>
+                  </div>
+                  {uploadResult.tx_hash && (
+                    <div className="detail-item">
+                      <strong>⛓️ Transaction Hash:</strong>
+                      <span className="tx-hash">{uploadResult.tx_hash}</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="new-registration-info">
+                  <p className="success-message">
+                    <strong>✅ Video başarıyla Stellar blockchain'ine kaydedildi!</strong><br/>
+                    {uploadResult.message || 'Video sahipliği zincirde doğrulandı.'}
+                  </p>
+                </div>
+              )}
 
               {uploadResult.video_url && (
                 <div className="detail-item">
-                  <strong>Video URL:</strong> {uploadResult.video_url}
+                  <strong>Video:</strong> {uploadResult.video_url}
                 </div>
               )}
 
@@ -285,14 +643,35 @@ const VideoUpload = () => {
                 </div>
               )}
 
+              {uploadResult.tx_hash && (
+                <div className="detail-item">
+                  <strong>Transaction Hash:</strong>
+                  <span className="tx-hash">{uploadResult.tx_hash}</span>
+                </div>
+              )}
+
+              {uploadResult.prepared_tx_hash && (
+                <div className="detail-item">
+                  <strong>Hazırlanan Transaction Hash:</strong>
+                  <span className="tx-hash">{uploadResult.prepared_tx_hash}</span>
+                </div>
+              )}
+
               <div className="detail-item">
-                <strong>Transaction Hash:</strong>
-                <span className="tx-hash">{uploadResult.tx_hash}</span>
+                <strong>Video ID:</strong> {uploadResult.video_id}
               </div>
 
               <div className="detail-item">
-                <strong>Cüzdan:</strong> {uploadResult.owner_wallet}
+                <strong>Cüzdan:</strong>
+                <span className="tx-hash">{uploadResult.owner_wallet}</span>
               </div>
+
+              {uploadResult.data_hash && (
+                <div className="detail-item">
+                  <strong>Data Hash:</strong>
+                  <span className="hash-preview">{uploadResult.data_hash.substring(0, 16)}...</span>
+                </div>
+              )}
             </div>
           ) : (
             <div className="pending-details">

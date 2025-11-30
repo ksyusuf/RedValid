@@ -2,13 +2,17 @@
 from sqlmodel import SQLModel, Session, create_engine, select
 from uuid import UUID
 from models import Reporter, Video
+import os
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
 
-sqlite_file_name = "database.db"
-sqlite_url = f"sqlite:///{sqlite_file_name}"
+# Database configuration from environment variables
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./database.db")
 
 engine = create_engine(
-    sqlite_url,
+    DATABASE_URL,
     echo=True,
     connect_args={"check_same_thread": False}
 )
