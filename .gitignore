@@ -28,3 +28,5 @@ Thumbs.db
 # Stellar secrets
 secrets/
 stellar_keys/
+
+videos/

@@ -115,3 +115,8 @@ def get_video_by_url(session: Session, url: str) -> Video | None:
     return session.exec(
         select(Video).where(Video.video_url == url)
     ).first()
+    
+def get_video_by_data_hash(session: Session, data_hash: str) -> Video | None:
+    return session.exec(
+        select(Video).where(Video.data_hash == data_hash)
+    ).first()

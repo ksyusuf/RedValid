@@ -23,15 +23,17 @@ class ReporterCreateRequest(BaseModel):
 
 class VideoPrepareRequest(BaseModel):
     reporter_wallet: str
-    video_url: str
+    video_url: Optional[str] = None
+    video_file: Optional[str] = None  # Base64 encoded video file
 
     class Config:
         json_schema_extra = {
             "example": {
-                "reporter_wallet": "GBX5BZ4YNU2JTXBZ5N6RMVDA7D7F3C2M6VX2YXK2XKL7HZDQ4NZXPQZ",
-                "video_url": "https://www.youtube.com/watch?v=PxAr1r-1EUA",
+                "reporter_wallet": "GAVMYU2ZXTQ7IAK77NAICSKZZNH6T2FPVQ6XIAUWWHIZ6P7Y2CS736A6",
+                "video_url": "https://www.youtube.com/watch?v=PxAr1r-1EUA"
             }
-        }
+    }
+
 
 
 class SubmitTransactionRequest(BaseModel):

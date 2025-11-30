@@ -1,16 +1,20 @@
-from fastapi import FastAPI, Depends, HTTPException, Body
+from fastapi import FastAPI, Depends, HTTPException, Body, UploadFile, File
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import io
 from dotenv import load_dotenv
 import base64
 
 from stellar_utils import (
-    generate_data_hash,
-    prepare_stellar_transaction,
     submit_stellar_transaction,
     verify_transaction_on_blockchain,
+)
+from hashing import (
+    generate_hash_from_video_file,
+    process_video_preparation,
+    generate_hash_from_video_url
 )
 
 from models import (
@@ -100,71 +104,62 @@ def get_reporter_endpoint(wallet_address: str, session=Depends(get_session)):
 
 
 @app.post("/videos/prepare-transaction")
-def prepare_video_verification(req: VideoPrepareRequest, session=Depends(get_session)):
-    logger.info(f"Video prepare request geldi: {req.video_url} - {req.reporter_wallet}")
+async def prepare_video_verification(
+    req: VideoPrepareRequest,
+    session=Depends(get_session)
+    ):
+    logger.info(f"Video prepare request geldi: URL={req.video_url} - {req.reporter_wallet}")
 
     reporter = get_reporter_by_wallet(session, req.reporter_wallet)
     if not reporter:
-        logger.warning(f"Muhabir bulunamadı: {req.reporter_wallet}")
         raise HTTPException(404, "Muhabir cüzdanı bulunamadı.")
 
-    # Check if video URL already exists
-    existing_video = get_video_by_url(session, req.video_url)
-    if existing_video:
-        logger.info(f"Video URL already exists: {req.video_url}")
-        return {
-            "message": "Bu video URL'si zaten kayıtlı.",
-            "video_id": existing_video.id,
-            "video_url": existing_video.video_url,
-            "status": existing_video.status,
-            "data_hash": existing_video.data_hash,
-            "prepared_tx_hash": existing_video.prepared_tx_hash,
-            "already_registered": True
-        }
+    if not req.video_url:
+        raise HTTPException(400, "Video URL sağlanmalıdır.")
+
+    # URL'den hash üret
+    data_hash = generate_hash_from_video_url(req.video_url, session)
+    return process_video_preparation(
+        session=session,
+        data_hash=data_hash,
+        video_identifier=req.video_url,
+        reporter=reporter        
+    )
+
+
+@app.post("/videos/prepare-transaction/upload")
+async def prepare_video_verification_with_upload(
+    reporter_wallet: str,
+    video_file: UploadFile = File(...),
+    session=Depends(get_session)
+    ):
+    logger.info(f"Video upload request geldi: File={video_file.filename} - {reporter_wallet}")
+
+    reporter = get_reporter_by_wallet(session, reporter_wallet)
+    if not reporter:
+        logger.warning(f"Muhabir bulunamadı: {reporter_wallet}")
+        raise HTTPException(404, "Muhabir cüzdanı bulunamadı.")
+
+    if not video_file:
+        raise HTTPException(400, "Video dosyası boş.")
 
     try:
-        data_hash = generate_data_hash(req.video_url, str(reporter.id))
-        logger.info(f"Data hash üretildi: {data_hash}")
-    except Exception as e:
-        logger.error(f"Hash oluşturulamadı: {e}", exc_info=True)
-        raise HTTPException(500, f"Hash oluşturulamadı: {e}")
-
-    try:
-        xdr_base64, prepared_tx_hash = prepare_stellar_transaction(
-            reporter_public_key=reporter.wallet_address,
-            data_hash=data_hash
-        )
-        logger.info(f"Stellar işlem hazır: {prepared_tx_hash}")
-    except Exception as e:
-        logger.error(f"Stellar işlem hazırlığı başarısız: {e}", exc_info=True)
-        raise HTTPException(500, f"Stellar işlem hazırlığı başarısız: {e}")
-
-    try:
-        video = create_video_record(
-            session,
-            reporter_id=reporter.id,
-            video_url=req.video_url,
-            platform="unknown",
+        # UploadFile'ı BytesIO'ya dönüştür
+        video_content = await video_file.read()
+        video_file_like = io.BytesIO(video_content)
+        
+        data_hash = generate_hash_from_video_file(video_file_like, session)
+        video_identifier = f"uploaded_video_{data_hash[:16]}"
+        return process_video_preparation(
+            session=session,
             data_hash=data_hash,
-            prepared_tx_hash=prepared_tx_hash,
-            tx_hash=None,
-            reporter_wallet=reporter.wallet_address
+            video_identifier=video_identifier,
+            reporter=reporter
         )
-
-        logger.info(f"Video kaydedildi: {video.id}")
+        
     except Exception as e:
-        logger.error(f"Veritabanına kaydedilemedi: {e}", exc_info=True)
-        raise HTTPException(500, f"Veritabanına kaydedilemedi: {e}")
-
-    return {
-        "message": "İşlem imzaya hazır.",
-        "video_id": video.id,
-        "video_url": video.video_url,
-        "data_hash": video.data_hash,
-        "xdr_for_signing": xdr_base64,
-        "prepared_tx_hash": prepared_tx_hash,
-        "already_registered": False
-    }
+        logger.error(f"Video işleme hatası: {e}")
+        raise HTTPException(400, f"Video işleme hatası: {e}")
 
 
 # -------------------------------------------

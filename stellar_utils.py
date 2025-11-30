@@ -1,4 +1,3 @@
-import hashlib
 import os
 from dotenv import load_dotenv
 from typing import Optional, Tuple, List
@@ -61,18 +60,6 @@ def mark_transaction_submitted(prepared_tx_hash: str, horizon_tx_hash: str, ledg
     Transaction başarıyla submit edildiğinde DB'yi güncelle.
     """
     print("MARK_SUBMITTED:", prepared_tx_hash, horizon_tx_hash, ledger)
-
-
-# ---------------------
-# HASH GENERATION
-# ---------------------
-def generate_data_hash(video_url: str, reporter_id: str) -> str:
-    """
-    Video URL + Reporter ID → SHA256 Hash (hex).
-    """
-    data_string = f"{video_url}:{reporter_id}"
-    return hashlib.sha256(data_string.encode("utf-8")).hexdigest()
-
 
 # ---------------------
 # HELPERS (VALIDATION)
