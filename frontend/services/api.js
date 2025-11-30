@@ -86,16 +86,39 @@ export const queryVideo = async (videoUrl) => {
 };
 
 /**
- * Video URL'ini yükler ve hash hesaplar
+ * Video URL'ini yükler ve hash hesaplar (URL tabanlı doğrulama)
  * @param {string} walletAddress - Cüzdan adresi
  * @param {string} videoUrl - Video URL'i
  * @returns {Promise<Object>} Yükleme sonucu
  */
-export const uploadVideo = async (walletAddress, videoUrl) => {
+export const uploadVideoFromUrl = async (walletAddress, videoUrl, fullName = null) => {
   try {
     const response = await api.post('/videos/prepare-transaction', {
       reporter_wallet: walletAddress,
       video_url: videoUrl
+    });
+    return response.data;
+  } catch (error) {
+    throw error;
+  }
+};
+
+/**
+ * Video dosyasını yükler ve hash hesaplar (Dosya tabanlı doğrulama)
+ * @param {string} walletAddress - Cüzdan adresi
+ * @param {File} videoFile - Video dosyası
+ * @returns {Promise<Object>} Yükleme sonucu
+ */
+export const uploadVideoFromFile = async (walletAddress, videoFile) => {
+  try {
+    const formData = new FormData();
+    formData.append('reporter_wallet', walletAddress);
+    formData.append('video_file', videoFile);
+
+    const response = await api.post('/videos/prepare-transaction/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
     });
     return response.data;
   } catch (error) {

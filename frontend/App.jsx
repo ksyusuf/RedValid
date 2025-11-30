@@ -19,6 +19,27 @@ function App() {
         </div>
       </header>
 
+      <nav className="tab-navigation">
+        <button
+          className={`tab-button ${activeTab === 'home' ? 'active' : ''}`}
+          onClick={() => setActiveTab('home')}
+        >
+          🏠 Ana Sayfa
+        </button>
+        <button
+          className={`tab-button ${activeTab === 'check' ? 'active' : ''}`}
+          onClick={() => setActiveTab('check')}
+        >
+          🔍 Video Sorgula
+        </button>
+        <button
+          className={`tab-button ${activeTab === 'upload' ? 'active' : ''}`}
+          onClick={() => setActiveTab('upload')}
+        >
+          📤 Video Yükle
+        </button>
+      </nav>
+
       {activeTab === 'home' && (
         <section className="hero-section">
           <div className="hero-content">
@@ -70,27 +91,6 @@ function App() {
           </div>
         </section>
       )}
-
-      <nav className="tab-navigation">
-        <button
-          className={`tab-button ${activeTab === 'home' ? 'active' : ''}`}
-          onClick={() => setActiveTab('home')}
-        >
-          🏠 Ana Sayfa
-        </button>
-        <button
-          className={`tab-button ${activeTab === 'check' ? 'active' : ''}`}
-          onClick={() => setActiveTab('check')}
-        >
-          🔍 Video Sorgula
-        </button>
-        <button
-          className={`tab-button ${activeTab === 'upload' ? 'active' : ''}`}
-          onClick={() => setActiveTab('upload')}
-        >
-          📤 Video Yükle
-        </button>
-      </nav>
 
       <main className="app-main">
         {activeTab === 'check' && <VideoQuery initialUrl={searchInput} />}

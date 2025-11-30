@@ -1,4 +1,4 @@
-import { isConnected, requestAccess, getAddress } from "@stellar/freighter-api";
+import { isConnected, requestAccess } from "@stellar/freighter-api";
 
 /**
  * Cüzdan bağlantısını kontrol eder
@@ -8,17 +8,24 @@ export async function checkWalletConnection() {
   try {
     const connected = await isConnected();
     if (connected) {
-      const addressResult = await getAddress();
+      // requestAccess ile adresi al (kullanıcı onayı gerekmeden)
+      const accessResult = await requestAccess();
       
       // Farklı response formatlarını destekle
       let walletAddress = null;
       
-      if (typeof addressResult === 'string') {
-        // String olarak gelirse
-        walletAddress = addressResult;
-      } else if (addressResult && typeof addressResult === 'object' && 'address' in addressResult) {
+      if (accessResult && typeof accessResult === 'object' && 'address' in accessResult) {
         // Object olarak gelirse ve address property'si varsa
-        walletAddress = addressResult.address;
+        walletAddress = accessResult.address;
+      } else if (typeof accessResult === 'string') {
+        // String olarak gelirse
+        if (accessResult === "true") {
+          // Bu durumda adresi alamıyoruz, null döndür
+          walletAddress = null;
+        } else if (/^G[A-Z2-7]{55}$/.test(accessResult)) {
+          // Direkt Stellar adresi gelmişse
+          walletAddress = accessResult;
+        }
       }
       
       if (walletAddress && typeof walletAddress === 'string' && walletAddress.startsWith('G')) {
@@ -54,11 +61,8 @@ export async function getWalletAddress() {
     // Eski format kontrolü
     if (typeof addressResult === 'string') {
       if (addressResult === "true") {
-        const addressFromGet = await getAddress();
-        if (!addressFromGet || typeof addressFromGet !== 'string') {
-          throw new Error("Cüzdan adresi alınamadı.");
-        }
-        return addressFromGet;
+        // Bu durumda adresi alamıyoruz
+        throw new Error("Cüzdan adresi alınamadı. Lütfen cüzdanınızı tekrar bağlayın.");
       } else if (/^G[A-Z2-7]{55}$/.test(addressResult)) {
         // Direkt adres döndürülmüşse
         return addressResult;

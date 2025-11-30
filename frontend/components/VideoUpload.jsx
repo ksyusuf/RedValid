@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { uploadVideo, submitTransaction } from '../services/api';
+import { uploadVideoFromUrl, uploadVideoFromFile, submitTransaction } from '../services/api';
 import { getWalletAddress, autoConnectWallet, disconnectWallet } from '../services/wallet';
 import { signTransaction } from '@stellar/freighter-api';
 import './VideoUpload.css';
@@ -13,21 +13,7 @@ const VideoUpload = () => {
   const [uploadResult, setUploadResult] = useState(null);
   const [error, setError] = useState(null);
   const [connecting, setConnecting] = useState(false);
-
-  useEffect(() => {
-    checkConnection();
-  }, []);
-
-  const checkConnection = async () => {
-    try {
-      const address = await autoConnectWallet();
-      if (address) {
-        setWalletAddress(address);
-      }
-    } catch (err) {
-      console.log('Otomatik bağlantı başarısız:', err);
-    }
-  };
+  const [uploadType, setUploadType] = useState('url'); // 'url' veya 'file'
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -36,7 +22,18 @@ const VideoUpload = () => {
       const address = await getWalletAddress();
       setWalletAddress(address);
     } catch (err) {
-      setError(err.message || 'Cüzdan bağlantısı kurulamadı.');
+      console.error('Wallet connection error:', err);
+      
+      // Daha kullanıcı dostu hata mesajları
+      if (err.message?.includes('internal error') || err.message?.includes('wallet encountered')) {
+        setError('Freighter cüzdanında bir hata oluştu. Lütfen cüzdan eklentisini yenileyin veya tekrar deneyin.');
+      } else if (err.message?.includes('not connected') || err.message?.includes('bağlı değil')) {
+        setError('Freighter cüzdanınız bağlı değil. Lütfen cüzdan eklentisini yükleyin ve bağlayın.');
+      } else if (err.message?.includes('rejected') || err.message?.includes('reddedildi')) {
+        setError('Cüzdan bağlantısı iptal edildi. Tekrar denemek için butona tıklayın.');
+      } else {
+        setError(err.message || 'Cüzdan bağlantısı kurulamadı. Lütfen Freighter eklentisinin yüklü ve aktif olduğundan emin olun.');
+      }
     } finally {
       setConnecting(false);
     }
@@ -54,8 +51,14 @@ const VideoUpload = () => {
       return;
     }
 
-    if (!videoUrl.trim() && !videoFile) {
-      setError('Video URL veya video dosyası seçmelisiniz.');
+    // Seçilen yükleme tipine göre input kontrolü
+    if (uploadType === 'url' && !videoUrl.trim()) {
+      setError('Lütfen bir video URL\'i girin.');
+      return;
+    }
+    
+    if (uploadType === 'file' && !videoFile) {
+      setError('Lütfen bir video dosyası seçin.');
       return;
     }
 
@@ -66,27 +69,52 @@ const VideoUpload = () => {
     try {
       let uploadData;
 
-      // -----------  DOSYA YÜKLEME  -----------
-      if (videoFile) {
-        const formData = new FormData();
-        formData.append("wallet_address", walletAddress);
-        formData.append("video_file", videoFile);
-        if (fullName.trim()) formData.append("full_name", fullName);
+      if (uploadType === 'url') {
+        // -----------  URL YÜKLEME  -----------
+        console.log('URL yükleme başlatılıyor:', videoUrl);
+        uploadData = await uploadVideoFromUrl(walletAddress, videoUrl, fullName);
+        console.log('URL yükleme tamamlandı:', uploadData);
 
-        uploadData = await uploadVideo(formData, true);
-
-      // -----------  URL YÜKLEME  -----------
       } else {
-        uploadData = await uploadVideo(walletAddress, videoUrl, fullName);
+        // -----------  DOSYA YÜKLEME  -----------
+        console.log('Dosya yükleme başlatılıyor:', videoFile.name);
+        uploadData = await uploadVideoFromFile(walletAddress, videoFile);
       }
 
       setUploadResult(uploadData);
 
+      // ----------- XDR VALİDASYON -----------
+      if (!uploadData.xdr_for_signing || typeof uploadData.xdr_for_signing !== 'string') {
+        throw new Error('Geçersiz XDR verisi alındı. Lütfen tekrar deneyin.');
+      }
+
+      console.log('XDR length:', uploadData.xdr_for_signing.length);
+      console.log('XDR starts with:', uploadData.xdr_for_signing.substring(0, 20) + '...');
+
       // ----------- XDR İMZALAMA -----------
-      const signedXdr = await signTransaction(uploadData.xdr_for_signing, {
-        network: 'testnet',
-        accountToSign: walletAddress
-      });
+      console.log('Wallet address:', walletAddress);
+      
+      let signedXdr;
+      try {
+        signedXdr = await signTransaction(uploadData.xdr_for_signing, {
+          networkPassphrase: 'Test SDF Network ; September 2015',
+          accountToSign: walletAddress
+        });
+        console.log('XDR signing successful, signed XDR length:', signedXdr?.length);
+      } catch (signError) {
+        console.error('XDR signing failed:', signError);
+        
+        // Eğer imzalama başarısız olursa, kullanıcıya özel mesaj göster
+        if (signError.message?.includes('internal error')) {
+          throw new Error('Freighter cüzdanında bir hata oluştu. Lütfen cüzdan eklentisini yenileyin ve tekrar deneyin.');
+        } else if (signError.message?.includes('User rejected') || signError.message?.includes('cancelled')) {
+          throw new Error('İmzalama işlemi iptal edildi. Tekrar denemek için butona tıklayın.');
+        } else if (signError.message?.includes('invalid') || signError.message?.includes('malformed')) {
+          throw new Error('İmza verisi geçersiz. Backend ile iletişim kurun.');
+        } else {
+          throw new Error(`İmzalama hatası: ${signError.message || 'Bilinmeyen hata'}`);
+        }
+      }
 
       // ----------- ZİNCİRE GÖNDERME ---------
       const submitData = await submitTransaction(uploadData.video_id, signedXdr);
@@ -95,14 +123,21 @@ const VideoUpload = () => {
         ...uploadData,
         ...submitData,
         signed: true,
-        video_url: videoUrl || uploadData.video_url,
-        file_name: videoFile ? videoFile.name : null,
+        video_url: uploadType === 'url' ? videoUrl : uploadData.video_url,
+        file_name: uploadType === 'file' ? videoFile.name : null,
         owner_wallet: walletAddress
       });
 
     } catch (err) {
-      if (err.message?.includes('User rejected')) {
-        setError('İşlem kullanıcı tarafından reddedildi.');
+      console.error('Upload error:', err);
+      
+      // Freighter wallet hataları için özel mesajlar
+      if (err.message?.includes('internal error') || err.message?.includes('wallet encountered')) {
+        setError('Freighter cüzdanında bir hata oluştu. Lütfen cüzdan eklentisini yenileyin ve tekrar deneyin.');
+      } else if (err.message?.includes('User rejected')) {
+        setError('İşlem cüzdan tarafından reddedildi. Tekrar denemek için butona tıklayın.');
+      } else if (err.message?.includes('not connected') || err.message?.includes('bağlı değil')) {
+        setError('Cüzdan bağlantısı kesildi. Lütfen önce tekrar bağlanın.');
       } else {
         setError(err.response?.data?.detail || err.message || 'Bir hata oluştu.');
       }
@@ -143,46 +178,72 @@ const VideoUpload = () => {
           {/* ------------ FORM ------------ */}
           <div className="upload-form">
 
-            {/* AD SOYAD */}
+            {/* YÜKLEME TİPİ SEÇİMİ */}
             <div className="form-group">
-              <label htmlFor="fullName">Ad Soyad (Opsiyonel)</label>
-              <input
-                id="fullName"
-                type="text"
-                placeholder="Adınız ve soyadınız"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="form-input"
-              />
-            </div>
-
-            {/* DOSYA YÜKLEME */}
-            <div className="form-group">
-              <label htmlFor="videoFile">Video Dosyası (Opsiyonel)</label>
-              <input
-                id="videoFile"
-                type="file"
-                accept="video/*"
-                onChange={(e) => setVideoFile(e.target.files[0])}
-                className="form-input"
-              />
-              {videoFile && (
-                <p className="selected-file">Seçilen dosya: {videoFile.name}</p>
-              )}
+              <label>Yükleme Tipi:</label>
+              <div className="upload-type-selection">
+                <label className={`upload-type-option ${uploadType === 'url' ? 'active' : ''}`}>
+                  <input
+                    type="radio"
+                    name="uploadType"
+                    value="url"
+                    checked={uploadType === 'url'}
+                    onChange={(e) => {
+                      setUploadType(e.target.value);
+                      setVideoFile(null);
+                      setVideoUrl('');
+                    }}
+                  />
+                  <span>🔗 Video URL'si</span>
+                </label>
+                <label className={`upload-type-option ${uploadType === 'file' ? 'active' : ''}`}>
+                  <input
+                    type="radio"
+                    name="uploadType"
+                    value="file"
+                    checked={uploadType === 'file'}
+                    onChange={(e) => {
+                      setUploadType(e.target.value);
+                      setVideoFile(null);
+                      setVideoUrl('');
+                    }}
+                  />
+                  <span>📁 Video Dosyası</span>
+                </label>
+              </div>
             </div>
 
             {/* URL YÜKLEME */}
-            <div className="form-group">
-              <label htmlFor="videoUrl">Video URL (Opsiyonel)</label>
-              <input
-                id="videoUrl"
-                type="text"
-                placeholder="Video linki girin (YouTube, Twitter, TikTok, vb.)"
-                value={videoUrl}
-                onChange={(e) => setVideoUrl(e.target.value)}
-                className="form-input"
-              />
-            </div>
+            {uploadType === 'url' && (
+              <div className="form-group">
+                <label htmlFor="videoUrl">Video URL</label>
+                <input
+                  id="videoUrl"
+                  type="text"
+                  placeholder="Video linki girin (YouTube, Twitter, TikTok, vb.)"
+                  value={videoUrl}
+                  onChange={(e) => setVideoUrl(e.target.value)}
+                  className="form-input"
+                />
+              </div>
+            )}
+
+            {/* DOSYA YÜKLEME */}
+            {uploadType === 'file' && (
+              <div className="form-group">
+                <label htmlFor="videoFile">Video Dosyası</label>
+                <input
+                  id="videoFile"
+                  type="file"
+                  accept="video/*"
+                  onChange={(e) => setVideoFile(e.target.files[0])}
+                  className="form-input"
+                />
+                {videoFile && (
+                  <p className="selected-file">Seçilen dosya: {videoFile.name}</p>
+                )}
+              </div>
+            )}
 
             {/* YÜKLEME BUTONU */}
             <button
@@ -190,7 +251,7 @@ const VideoUpload = () => {
               disabled={loading}
               className="upload-button"
             >
-              {loading ? 'Yükleniyor...' : 'Video Yükle ve Zincire Kaydet'}
+              {loading ? 'Yükleniyor...' : `${uploadType === 'url' ? 'URL\'den' : 'Dosyadan'} Video Yükle ve Zincire Kaydet`}
             </button>
           </div>
         </div>
