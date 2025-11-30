@@ -39,7 +39,8 @@ const VideoQuery = ({ initialUrl = '' }) => {
         formattedResult = {
           found: true,
           verified: true,
-          message: 'Video Stellar blockchain üzerinde doğrulanmış.',
+          already_registered: false, // Videos verified on Stellar should show green theme
+          message: '✅ Video Stellar blockchain üzerinde doğrulanmış ve kayıtlı.',
           video_url: response.video_url || queryUrl,
           platform: 'unknown', // Backend'den gelmiyor
           tx_hash: response.stellar_transaction_id,
@@ -114,7 +115,10 @@ const VideoQuery = ({ initialUrl = '' }) => {
         formattedResult = {
           found: true,
           verified: isVerified,
-          message: response.message,
+          already_registered: !isVerified, // Mark as already registered only for non-verified uploads (orange theme)
+          message: isVerified 
+            ? '✅ Bu video dosyası Stellar blockchain üzerinde doğrulanmış ve kayıtlı.' 
+            : '🟠 Bu video dosyası zaten yüklenmiş ancak henüz blockchain\'de doğrulanmamış.',
           video_url: response.video_info?.video_url || `Dosya: ${selectedFile.name}`,
           platform: 'uploaded',
           tx_hash: response.video_info?.tx_hash || response.video_info?.prepared_tx_hash,
@@ -274,23 +278,31 @@ const VideoQuery = ({ initialUrl = '' }) => {
       )}
 
       {result && (
-        <div className={`result-container ${result.found ? (result.verified ? 'verified' : 'not-verified') : 'not-found'}`}>
+        <div className={`result-container ${result.verified && !result.already_registered ? 'verified' : (result.already_registered ? 'already-registered' : (result.found ? 'not-verified' : 'not-found'))}`}>
           <h3>
-            {result.found 
-              ? (result.verified ? '✅ Video Doğrulanmış' : '⚠️ Video Kayıtlı Ama Doğrulanmamış')
-              : '❌ Video Bulunamadı'}
+            {result.verified && !result.already_registered
+              ? '✅ Video Zincirde Kayıtlı'
+              : (result.already_registered 
+                ? '🟠 Video Zaten Yüklenmiş'
+                : (result.found 
+                  ? '⚠️ Video Kayıtlı Ama Doğrulanmamış'
+                  : '❌ Video Bulunamadı'))}
           </h3>
-          <p className="result-message">{result.message}</p>
+          <p className="result-message">
+            {result.verified && !result.already_registered
+              ? '✅ Bu video Stellar blockchain üzerinde kayıtlı ve doğrulanmış durumda.'
+              : result.message}
+          </p>
           
           <div className="video-details">
             <div className="detail-item">
               <strong>📹 Video:</strong>
               {result.video_url && result.video_url.startsWith('http') ? (
-                <a href={result.video_url} target="_blank" rel="noopener noreferrer">
+                <a href={result.video_url} target="_blank" rel="noopener noreferrer" className="long-text">
                   {result.video_url}
                 </a>
               ) : (
-                <span>{result.video_url}</span>
+                <span className="long-text">{result.video_url}</span>
               )}
             </div>
             
@@ -318,7 +330,8 @@ const VideoQuery = ({ initialUrl = '' }) => {
               <div className="file-info">
                 <h4>📁 Dosya Bilgileri</h4>
                 <div className="detail-item">
-                  <strong>📄 Dosya Adı:</strong> {result.file_info.name}
+                  <strong>📄 Dosya Adı:</strong>
+                  <span className="long-text">{result.file_info.name}</span>
                 </div>
                 <div className="detail-item">
                   <strong>📏 Boyut:</strong> {(result.file_info.size / (1024 * 1024)).toFixed(2)} MB
@@ -340,11 +353,13 @@ const VideoQuery = ({ initialUrl = '' }) => {
               <div className="owner-info">
                 <h4>👤 Sahip Bilgileri</h4>
                 <div className="detail-item">
-                  <strong>💼 Cüzdan Adresi:</strong> {result.owner.wallet_address}
+                  <strong>💼 Cüzdan Adresi:</strong>
+                  <span className="wallet-address">{result.owner.wallet_address}</span>
                 </div>
                 {result.owner.full_name && (
                   <div className="detail-item">
-                    <strong>👥 Ad Soyad:</strong> {result.owner.full_name}
+                    <strong>👥 Ad Soyad:</strong>
+                    <span className="long-text">{result.owner.full_name}</span>
                   </div>
                 )}
               </div>

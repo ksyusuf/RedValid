@@ -83,6 +83,21 @@ const VideoUpload = () => {
 
       setUploadResult(uploadData);
 
+      // ----------- KAYITLI VİDEO KONTROLÜ -----------
+      if (uploadData.already_registered) {
+        // Video zaten kayıtlı, işlem tamamlandı
+        console.log('Video zaten kayıtlı, işlem durduruluyor');
+        setUploadResult({
+          ...uploadData,
+          signed: true, // Zaten kayıtlı olduğu için imzalanmış olarak işaretle
+          video_url: uploadType === 'url' ? videoUrl : uploadData.video_url,
+          file_name: uploadType === 'file' ? videoFile.name : null,
+          owner_wallet: walletAddress,
+          message: uploadData.message || 'Bu video zaten kayıtlı.'
+        });
+        return; // İşlemi burada sonlandır
+      }
+
       // ----------- XDR VALİDASYON -----------
       if (!uploadData.xdr_for_signing || typeof uploadData.xdr_for_signing !== 'string') {
         throw new Error('Geçersiz XDR verisi alındı. Lütfen tekrar deneyin.');
@@ -127,6 +142,7 @@ const VideoUpload = () => {
         file_name: uploadType === 'file' ? videoFile.name : null,
         owner_wallet: walletAddress
       });
+      console.log('Transaction submission successful:', uploadResult);
 
     } catch (err) {
       console.error('Upload error:', err);
@@ -294,18 +310,46 @@ const VideoUpload = () => {
 
       {/* ------------ SONUÇ ------------ */}
       {uploadResult && (
-        <div className={`result-container ${uploadResult.signed ? 'success' : 'pending'}`}>
+        <div className={`result-container ${uploadResult.already_registered ? 'already-registered' : (uploadResult.signed ? 'success' : 'pending')}`}>
           <h3>
-            {uploadResult.signed ? '✓ Video Başarıyla Zincire Kaydedildi' : '⚠ İmzalanıyor...'}
+            {uploadResult.already_registered 
+              ? '🟠 Video Zaten Zincirde Kayıtlı' 
+              : (uploadResult.signed ? '✓ Video Başarıyla Zincire Kaydedildi' : '⚠ İmzalanıyor...')}
           </h3>
 
           {uploadResult.signed ? (
             <div className="success-details">
-              <p className="success-message">{uploadResult.message}</p>
+              {uploadResult.already_registered ? (
+                <div className="already-registered-info">
+                  <p className="success-message">
+                    <strong>🟠 Bu video zaten Stellar blockchain'inde kayıtlı!</strong><br/>
+                    {uploadResult.message || 'Video daha önce zincire kaydedilmiş ve doğrulanmış durumda.'}
+                  </p>
+                  <div className="detail-item">
+                    <strong>📊 Durum:</strong> 
+                    <span className="status-badge already-registered">
+                      ✓ Zincirde Kayıtlı ve Doğrulanmış
+                    </span>
+                  </div>
+                  {uploadResult.tx_hash && (
+                    <div className="detail-item">
+                      <strong>⛓️ Transaction Hash:</strong>
+                      <span className="tx-hash">{uploadResult.tx_hash}</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="new-registration-info">
+                  <p className="success-message">
+                    <strong>✅ Video başarıyla Stellar blockchain'ine kaydedildi!</strong><br/>
+                    {uploadResult.message || 'Video sahipliği zincirde doğrulandı.'}
+                  </p>
+                </div>
+              )}
 
               {uploadResult.video_url && (
                 <div className="detail-item">
-                  <strong>Video URL:</strong> {uploadResult.video_url}
+                  <strong>Video:</strong> {uploadResult.video_url}
                 </div>
               )}
 
@@ -315,14 +359,35 @@ const VideoUpload = () => {
                 </div>
               )}
 
+              {uploadResult.tx_hash && (
+                <div className="detail-item">
+                  <strong>Transaction Hash:</strong>
+                  <span className="tx-hash">{uploadResult.tx_hash}</span>
+                </div>
+              )}
+
+              {uploadResult.prepared_tx_hash && (
+                <div className="detail-item">
+                  <strong>Hazırlanan Transaction Hash:</strong>
+                  <span className="tx-hash">{uploadResult.prepared_tx_hash}</span>
+                </div>
+              )}
+
               <div className="detail-item">
-                <strong>Transaction Hash:</strong>
-                <span className="tx-hash">{uploadResult.tx_hash}</span>
+                <strong>Video ID:</strong> {uploadResult.video_id}
               </div>
 
               <div className="detail-item">
-                <strong>Cüzdan:</strong> {uploadResult.owner_wallet}
+                <strong>Cüzdan:</strong>
+                <span className="tx-hash">{uploadResult.owner_wallet}</span>
               </div>
+
+              {uploadResult.data_hash && (
+                <div className="detail-item">
+                  <strong>Data Hash:</strong>
+                  <span className="hash-preview">{uploadResult.data_hash.substring(0, 16)}...</span>
+                </div>
+              )}
             </div>
           ) : (
             <div className="pending-details">

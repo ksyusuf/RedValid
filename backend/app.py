@@ -30,7 +30,6 @@ from db import (
     get_session,
     get_reporter_by_wallet,
     create_reporter_record,
-    create_video_record,
     update_video_status,
     get_video_by_url,
     get_video_by_data_hash
