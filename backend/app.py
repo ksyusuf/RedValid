@@ -2,9 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, Body, UploadFile, File
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-import os
 import io
-from dotenv import load_dotenv
 import base64
 
 from stellar_utils import (
@@ -23,7 +21,6 @@ from models import (
     VideoPrepareRequest, 
     SubmitTransactionRequest,
     VerificationRequest,
-    DataHashCheckRequest
 )
 from db import (
     create_db_and_tables,
@@ -39,9 +36,6 @@ import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Load environment variables
-load_dotenv()
-BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8000")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
