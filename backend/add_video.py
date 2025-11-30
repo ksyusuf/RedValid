@@ -2,6 +2,7 @@ import os
 import hashlib
 import tempfile
 import shutil
+import io
 from moviepy import VideoFileClip
 from dotenv import load_dotenv
 from typing import Union, Tuple, Dict, Any, BinaryIO
@@ -18,30 +19,39 @@ load_dotenv()
 MAX_DURATION = 10          # saniye
 MAX_FILE_SIZE = 50 * 1024 * 1024   # 50 MB
 
-VIDEO_BASE_DIR = os.environ.get("VIDEO_BASE_DIR")
-if not VIDEO_BASE_DIR:
-    raise RuntimeError("VIDEO_BASE_DIR environment variable required. Please set it in your .env file.")
-
-
-def crop_video(input_path: str, output_path: str, max_duration: int = MAX_DURATION) -> Tuple[bool, str]:
+def crop_video(input_path: str, output_buffer: io.BytesIO, max_duration: int = MAX_DURATION) -> Tuple[bool, str]:
     try:
         with VideoFileClip(input_path) as clip:
             duration = clip.duration
 
             if duration <= max_duration:
                 # Kısa videoyu olduğu gibi kopyala
-                shutil.copy2(input_path, output_path)
+                with open(input_path, 'rb') as input_file:
+                    output_buffer.write(input_file.read())
                 return True, f"Video {max_duration} saniyeden kısa, olduğu gibi kullanıldı."
 
-            # Kırpma işlemi
+            # Kırpma işlemi - write to buffer instead of file
             cropped_clip = clip.subclipped(0, max_duration)
-            cropped_clip.write_videofile(output_path, logger=None)
-            # cropped_clip ile iş bitince 'with' bloğu kapanınca otomatik kapatılır
-
-        return True, f"Video {max_duration} saniyeye kırpıldı (orijinal: {duration:.2f} saniye)"
+            
+            # Create a temporary file for moviepy output, then read to buffer
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_output:
+                temp_output_path = temp_output.name
+            
+            try:
+                cropped_clip.write_videofile(temp_output_path, logger=None)
+                
+                # Read the processed video into memory buffer
+                with open(temp_output_path, 'rb') as temp_file:
+                    output_buffer.write(temp_file.read())
+                    
+                return True, f"Video {max_duration} saniyeye kırpıldı (orijinal: {duration:.2f} saniye)"
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_output_path):
+                    os.remove(temp_output_path)
+                    
     except Exception as e:
         return False, f"Video kırpılırken hata oluştu: {e}"
-
 
 
 def validate_video(file: Union[str, BinaryIO]) -> Tuple[bool, Dict[str, Any]]:
@@ -75,23 +85,33 @@ def validate_video(file: Union[str, BinaryIO]) -> Tuple[bool, Dict[str, Any]]:
         clip.close()
         logger.info(f"Video süresi: {duration:.2f} saniye")
 
-        processed_path = file_path
+        # Process video in memory buffer instead of file
+        video_buffer = io.BytesIO()
+        processed_duration = duration
+        
         if duration > MAX_DURATION:
             logger.info("Video kırpılacak")
-            base_name = os.path.splitext(os.path.basename(file_path))[0]
-            processed_path = os.path.join(VIDEO_BASE_DIR, f"{base_name}_cropped_{MAX_DURATION}s.mp4")
-            success, message = crop_video(file_path, processed_path)
+            success, message = crop_video(file_path, video_buffer)
             logger.info(message)
             if not success:
                 if temp_file_path:
                     os.remove(temp_file_path)
                 return False, {"error": message, "processed_path": None}
-
+            processed_duration = min(duration, MAX_DURATION)
+        else:
+            # Copy original video to buffer
+            with open(file_path, 'rb') as original_file:
+                video_buffer.write(original_file.read())
+        
+        # Reset buffer position for reading
+        video_buffer.seek(0)
+        
         logger.info("Hash oluşturuluyor")
         sha256_hash = hashlib.sha256()
-        with open(processed_path, "rb") as f:
-            for byte_block in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(byte_block)
+        
+        # Calculate hash directly from memory buffer
+        for byte_block in iter(lambda: video_buffer.read(4096), b""):
+            sha256_hash.update(byte_block)
         hash_hex = sha256_hash.hexdigest()
         logger.info(f"Hash oluşturuldu: {hash_hex}")
 
@@ -102,9 +122,10 @@ def validate_video(file: Union[str, BinaryIO]) -> Tuple[bool, Dict[str, Any]]:
 
     return True, {
         "hash": hash_hex,
-        "processed_path": processed_path,
+        "processed_path": None,  # No persistent path needed
+        "processed_buffer": video_buffer,  # Return the memory buffer
         "original_duration": duration,
-        "processed_duration": min(duration, MAX_DURATION),
+        "processed_duration": processed_duration,
         "was_cropped": duration > MAX_DURATION
     }
 
