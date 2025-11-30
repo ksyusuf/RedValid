@@ -334,6 +334,65 @@
   background: #f8fafc;
 }
 
+/* Query Loading States */
+.query-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 2.5rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  min-width: 180px;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  animation: loading-glow 2s ease-in-out infinite;
+}
+
+.query-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top: 2px solid white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes loading-glow {
+  0%, 100% { 
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  }
+  50% { 
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+  }
+}
+
+/* Responsive Query Loading */
+@media (max-width: 768px) {
+  .query-loading {
+    padding: 0.75rem 1.5rem;
+    font-size: 0.9rem;
+    min-width: 140px;
+    gap: 0.5rem;
+  }
+  
+  .query-spinner {
+    width: 16px;
+    height: 16px;
+    border-width: 1.5px;
+  }
+}
+
+@media (max-width: 480px) {
+  .query-loading {
+    padding: 0.6rem 1rem;
+    font-size: 0.85rem;
+    min-width: 120px;
+  }
+}
+
 /* Wallet Address and Long Text Styles */
 .wallet-address, .long-text {
   font-size: 0.85rem;

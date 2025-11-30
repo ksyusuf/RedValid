@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { uploadVideoFromUrl, uploadVideoFromFile, submitTransaction } from '../services/api';
-import { getWalletAddress, autoConnectWallet, disconnectWallet } from '../services/wallet';
+import { getWalletAddress, autoConnectWallet, disconnectWallet, checkWalletConnection } from '../services/wallet';
 import { signTransaction } from '@stellar/freighter-api';
 import './VideoUpload.css';
 
@@ -13,10 +13,34 @@ const VideoUpload = () => {
   const [uploadResult, setUploadResult] = useState(null);
   const [error, setError] = useState(null);
   const [connecting, setConnecting] = useState(false);
+  const [autoCheckingConnection, setAutoCheckingConnection] = useState(true);
   const [uploadType, setUploadType] = useState('url'); // 'url' veya 'file'
+  const [preparingHash, setPreparingHash] = useState(false);
+  const [signingTransaction, setSigningTransaction] = useState(false);
+
+  // Component mount edildiğinde otomatik cüzdan bağlantısı kontrol et
+  useEffect(() => {
+    const checkConnectionOnLoad = async () => {
+      try {
+        const address = await checkWalletConnection();
+        if (address) {
+          setWalletAddress(address);
+          console.log('Otomatik cüzdan bağlantısı başarılı:', address);
+        }
+      } catch (error) {
+        console.log('Otomatik cüzdan bağlantısı başarısız:', error);
+        // Hata durumunda sessizce devam et, kullanıcı manuel bağlanabilir
+      } finally {
+        setAutoCheckingConnection(false);
+      }
+    };
+
+    checkConnectionOnLoad();
+  }, []);
 
   const handleConnect = async () => {
     setConnecting(true);
+    setAutoCheckingConnection(false);
     setError(null);
     try {
       const address = await getWalletAddress();
@@ -63,12 +87,17 @@ const VideoUpload = () => {
     }
 
     setLoading(true);
+    setPreparingHash(true);
+    setSigningTransaction(false);
     setError(null);
     setUploadResult(null);
 
     try {
       let uploadData;
 
+      // ----------- PREPARING PHASE -----------
+      setPreparingHash(true);
+      
       if (uploadType === 'url') {
         // -----------  URL YÜKLEME  -----------
         console.log('URL yükleme başlatılıyor:', videoUrl);
@@ -87,6 +116,7 @@ const VideoUpload = () => {
       if (uploadData.already_registered) {
         // Video zaten kayıtlı, işlem tamamlandı
         console.log('Video zaten kayıtlı, işlem durduruluyor');
+        setPreparingHash(false);
         setUploadResult({
           ...uploadData,
           signed: true, // Zaten kayıtlı olduğu için imzalanmış olarak işaretle
@@ -106,7 +136,10 @@ const VideoUpload = () => {
       console.log('XDR length:', uploadData.xdr_for_signing.length);
       console.log('XDR starts with:', uploadData.xdr_for_signing.substring(0, 20) + '...');
 
-      // ----------- XDR İMZALAMA -----------
+      // ----------- SIGNING PHASE -----------
+      setPreparingHash(false);
+      setSigningTransaction(true);
+      
       console.log('Wallet address:', walletAddress);
       
       let signedXdr;
@@ -116,8 +149,10 @@ const VideoUpload = () => {
           accountToSign: walletAddress
         });
         console.log('XDR signing successful, signed XDR length:', signedXdr?.length);
+        setSigningTransaction(false);
       } catch (signError) {
         console.error('XDR signing failed:', signError);
+        setSigningTransaction(false);
         
         // Eğer imzalama başarısız olursa, kullanıcıya özel mesaj göster
         if (signError.message?.includes('internal error')) {
@@ -146,6 +181,8 @@ const VideoUpload = () => {
 
     } catch (err) {
       console.error('Upload error:', err);
+      setPreparingHash(false);
+      setSigningTransaction(false);
       
       let errorMessage = 'Bir hata oluştu.';
       
@@ -200,7 +237,14 @@ const VideoUpload = () => {
       </p>
 
       {/* ------------ CÜZDAN BAĞLANTISI ------------ */}
-      {!walletAddress ? (
+      {autoCheckingConnection ? (
+        <div className="connect-section">
+          <div className="checking-connection">
+            <div className="loading-spinner"></div>
+            <p>Cüzdan bağlantısı kontrol ediliyor...</p>
+          </div>
+        </div>
+      ) : !walletAddress ? (
         <div className="connect-section">
           <button
             onClick={handleConnect}
@@ -291,14 +335,59 @@ const VideoUpload = () => {
               </div>
             )}
 
-            {/* YÜKLEME BUTONU */}
-            <button
-              onClick={handleUpload}
-              disabled={loading}
-              className="upload-button"
-            >
-              {loading ? 'Yükleniyor...' : `${uploadType === 'url' ? 'URL\'den' : 'Dosyadan'} Video Yükle ve Zincire Kaydet`}
-            </button>
+            {/* YÜKLEME BUTONU VE LOADING STATES */}
+            {!preparingHash && !signingTransaction && (
+              <button
+                onClick={handleUpload}
+                disabled={loading}
+                className="upload-button"
+              >
+                {loading ? 'Yükleniyor...' : `${uploadType === 'url' ? 'URL\'den' : 'Dosyadan'} Video Yükle ve Zincire Kaydet`}
+              </button>
+            )}
+
+            {/* PREPARING HASH STATE */}
+            {preparingHash && (
+              <div className="loading-state">
+                <div className="cool-spinner preparing-spinner"></div>
+                <div className="loading-text">
+                  <h4>🔐 Hash Hazırlanıyor</h4>
+                  <p>Video hash'i oluşturulup blockchain'e hazırlanıyor...</p>
+                  <div className="progress-dots">
+                    <span className="dot active"></span>
+                    <span className="dot"></span>
+                    <span className="dot"></span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SIGNING TRANSACTION STATE */}
+            {signingTransaction && (
+              <div className="loading-state">
+                <div className="cool-spinner signing-spinner"></div>
+                <div className="loading-text">
+                  <h4>✍️ İşlem İmzalanıyor</h4>
+                  <p>Freighter cüzdanınızda işlemi imzalayın...</p>
+                  <div className="progress-dots">
+                    <span className="dot completed"></span>
+                    <span className="dot active"></span>
+                    <span className="dot"></span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* GENERAL LOADING STATE */}
+            {loading && !preparingHash && !signingTransaction && (
+              <div className="loading-state">
+                <div className="cool-spinner upload-spinner"></div>
+                <div className="loading-text">
+                  <h4>📤 Yükleniyor</h4>
+                  <p>Video işleniyor, lütfen bekleyin...</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

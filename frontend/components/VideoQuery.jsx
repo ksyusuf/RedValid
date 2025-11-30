@@ -9,6 +9,7 @@ const VideoQuery = ({ initialUrl = '' }) => {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [queryType, setQueryType] = useState(''); // 'url' or 'file'
 
   useEffect(() => {
     if (initialUrl && initialUrl.trim()) {
@@ -26,6 +27,7 @@ const VideoQuery = ({ initialUrl = '' }) => {
     }
 
     setLoading(true);
+    setQueryType('url');
     setError(null);
     setResult(null);
 
@@ -101,6 +103,7 @@ const VideoQuery = ({ initialUrl = '' }) => {
     }
 
     setLoading(true);
+    setQueryType('file');
     setError(null);
     setResult(null);
 
@@ -226,13 +229,20 @@ const VideoQuery = ({ initialUrl = '' }) => {
               className="video-url-input"
               onKeyPress={(e) => e.key === 'Enter' && handleQuery()}
             />
-            <button
-              onClick={() => handleQuery()}
-              disabled={loading}
-              className="query-button"
-            >
-              {loading ? '⏳ Sorgulanıyor...' : '🔍 Sorgula'}
-            </button>
+            {!loading ? (
+              <button
+                onClick={() => handleQuery()}
+                disabled={loading}
+                className="query-button"
+              >
+                🔍 Sorgula
+              </button>
+            ) : (
+              <div className="query-loading">
+                <div className="query-spinner"></div>
+                <span>Sorgulanıyor...</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -260,13 +270,20 @@ const VideoQuery = ({ initialUrl = '' }) => {
                 </div>
               )}
             </div>
-            <button
-              onClick={handleFileQuery}
-              disabled={loading || !selectedFile}
-              className="query-button"
-            >
-              {loading ? '⏳ Analiz Ediliyor...' : '🔍 Dosya Sorgula'}
-            </button>
+            {!loading ? (
+              <button
+                onClick={handleFileQuery}
+                disabled={loading || !selectedFile}
+                className="query-button"
+              >
+                🔍 Dosya Sorgula
+              </button>
+            ) : (
+              <div className="query-loading">
+                <div className="query-spinner"></div>
+                <span>Analiz Ediliyor...</span>
+              </div>
+            )}
           </div>
         </div>
       )}
