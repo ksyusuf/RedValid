@@ -129,10 +129,12 @@ async def prepare_video_verification(
 
 @app.post("/videos/prepare-transaction/upload")
 async def prepare_video_verification_with_upload(
-    reporter_wallet: str,
     video_file: UploadFile = File(...),
+    reporter_wallet: str = None,
     session=Depends(get_session)
     ):
+    print(reporter_wallet)
+    print(video_file)
     logger.info(f"Video upload request geldi: File={video_file.filename} - {reporter_wallet}")
 
     reporter = get_reporter_by_wallet(session, reporter_wallet)
@@ -149,6 +151,13 @@ async def prepare_video_verification_with_upload(
         video_file_like = io.BytesIO(video_content)
         
         data_hash = generate_hash_from_video_file(video_file_like, session)
+        
+        # Handle the case where data_hash is a dict (video already exists)
+        if isinstance(data_hash, dict):
+            # Video already exists, return the existing record
+            return data_hash
+        
+        # data_hash is a string, proceed with normal processing
         video_identifier = f"uploaded_video_{data_hash[:16]}"
         return process_video_preparation(
             session=session,

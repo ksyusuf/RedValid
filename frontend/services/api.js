@@ -105,23 +105,57 @@ export const uploadVideoFromUrl = async (walletAddress, videoUrl, fullName = nul
 
 /**
  * Video dosyasını yükler ve hash hesaplar (Dosya tabanlı doğrulama)
- * @param {string} walletAddress - Cüzdan adresi
- * @param {File} videoFile - Video dosyası
+ * @param {string} reporter_wallet - Cüzdan adresi
+ * @param {File} video_file - Video dosyası
  * @returns {Promise<Object>} Yükleme sonucu
  */
-export const uploadVideoFromFile = async (walletAddress, videoFile) => {
+export const uploadVideoFromFile = async (reporter_wallet, video_file) => {
   try {
-    const formData = new FormData();
-    formData.append('reporter_wallet', walletAddress);
-    formData.append('video_file', videoFile);
+    if (!reporter_wallet) {
+      throw new Error('Cüzdan adresi gereklidir.');
+    }
+    
+    if (!video_file) {
+      throw new Error('Video dosyası seçilmedi.');
+    }
+    
+    // Dosya boyutu kontrolü (50MB limit)
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (video_file.size > maxSize) {
+      throw new Error('Video dosyası 50MB\'dan büyük olamaz.');
+    }
 
-    const response = await api.post('/videos/prepare-transaction/upload', formData, {
+    const formData = new FormData();
+    formData.append('video_file', video_file);
+
+    console.log('Dosya upload başlatılıyor:', {
+      video_file: video_file.name,
+      fileSize: video_file.size,
+      reporter_wallet: reporter_wallet
+    });
+
+    // reporter_wallet'ı URL query parameter olarak gönder
+    const response = await api.post(`/videos/prepare-transaction/upload?reporter_wallet=${reporter_wallet}`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: 30000, // 30 saniye timeout
     });
+    
+    console.log('Dosya upload başarılı:', response.data);
     return response.data;
   } catch (error) {
+    console.error('Dosya upload hatası:', error);
+    
+    // Özel hata mesajları
+    if (error.code === 'ECONNABORTED') {
+      throw new Error('İstek zaman aşımına uğradı. Lütfen daha küçük bir dosya deneyin.');
+    } else if (error.response?.status === 413) {
+      throw new Error('Video dosyası çok büyük.');
+    } else if (error.response?.status === 415) {
+      throw new Error('Desteklenmeyen dosya formatı. Lütfen video dosyası seçin.');
+    }
+    
     throw error;
   }
 };

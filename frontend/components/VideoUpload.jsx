@@ -131,15 +131,45 @@ const VideoUpload = () => {
     } catch (err) {
       console.error('Upload error:', err);
       
-      // Freighter wallet hataları için özel mesajlar
-      if (err.message?.includes('internal error') || err.message?.includes('wallet encountered')) {
+      let errorMessage = 'Bir hata oluştu.';
+      
+      // Backend'den gelen hatayı parse et
+      if (err.response?.data) {
+        const responseData = err.response.data;
+        
+        // FastAPI validation error format
+        if (responseData.detail) {
+          if (Array.isArray(responseData.detail)) {
+            // Validation error array
+            errorMessage = responseData.detail.map(item => 
+              typeof item === 'string' ? item : 
+              item.msg || item.message || JSON.stringify(item)
+            ).join(', ');
+          } else if (typeof responseData.detail === 'string') {
+            errorMessage = responseData.detail;
+          } else if (typeof responseData.detail === 'object') {
+            // Object format validation error
+            errorMessage = responseData.detail.msg || responseData.detail.message || 
+                          JSON.stringify(responseData.detail);
+          }
+        } else {
+          // Response data'yı string'e çevir
+          errorMessage = typeof responseData === 'string' ? responseData : 
+                        JSON.stringify(responseData);
+        }
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      // Freighter wallet hataları için özel mesajlar (önce kontrol et)
+      if (errorMessage.includes('internal error') || errorMessage.includes('wallet encountered')) {
         setError('Freighter cüzdanında bir hata oluştu. Lütfen cüzdan eklentisini yenileyin ve tekrar deneyin.');
-      } else if (err.message?.includes('User rejected')) {
+      } else if (errorMessage.includes('User rejected') || errorMessage.includes('reddedildi')) {
         setError('İşlem cüzdan tarafından reddedildi. Tekrar denemek için butona tıklayın.');
-      } else if (err.message?.includes('not connected') || err.message?.includes('bağlı değil')) {
+      } else if (errorMessage.includes('not connected') || errorMessage.includes('bağlı değil')) {
         setError('Cüzdan bağlantısı kesildi. Lütfen önce tekrar bağlanın.');
       } else {
-        setError(err.response?.data?.detail || err.message || 'Bir hata oluştu.');
+        setError(errorMessage);
       }
     } finally {
       setLoading(false);
