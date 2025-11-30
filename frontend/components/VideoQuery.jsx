@@ -38,12 +38,12 @@ const VideoQuery = ({ initialUrl = '' }) => {
           found: true,
           verified: true,
           message: 'Video Stellar blockchain üzerinde doğrulanmış.',
-          video_url: response.video_url,
+          video_url: response.video_url || queryUrl,
           platform: 'unknown', // Backend'den gelmiyor
           tx_hash: response.stellar_transaction_id,
           owner: {
-            wallet_address: response.reporter.wallet_address,
-            full_name: response.reporter.full_name
+            wallet_address: response.reporter?.wallet_address,
+            full_name: response.reporter?.full_name
           }
         };
       } else if (response.status === 'PROCESSING_ON_BLOCKCHAIN') {
@@ -51,7 +51,7 @@ const VideoQuery = ({ initialUrl = '' }) => {
           found: true,
           verified: false,
           message: response.message || 'Video blockchain\'de işleniyor.',
-          video_url: response.video_url,
+          video_url: response.video_url || queryUrl,
           tx_hash: response.stellar_transaction_id
         };
       } else if (response.status === 'VERIFIED' || response.status === 'SENDING') {
@@ -59,7 +59,7 @@ const VideoQuery = ({ initialUrl = '' }) => {
           found: true,
           verified: response.status === 'VERIFIED',
           message: response.status === 'VERIFIED' ? 'Video doğrulanmış.' : 'Video doğrulanıyor.',
-          video_url: queryUrl
+          video_url: response.video_url || queryUrl
         };
       } else {
         formattedResult = {
@@ -71,12 +71,18 @@ const VideoQuery = ({ initialUrl = '' }) => {
 
       setResult(formattedResult);
     } catch (err) {
+      console.error('Query error:', err);
+      
       if (err.response?.status === 404) {
         setResult({
           found: false,
           verified: false,
           message: 'Video doğrulama kaydı bulunamadı.'
         });
+      } else if (err.response?.status === 400) {
+        setError(err.response?.data?.detail || 'Geçersiz video URL\'i.');
+      } else if (err.code === 'NETWORK_ERROR' || err.message?.includes('Network Error')) {
+        setError('Sunucuya bağlanılamadı. Lütfen backend servisinin çalıştığından emin olun.');
       } else {
         setError(err.response?.data?.detail || err.message || 'Bir hata oluştu.');
       }

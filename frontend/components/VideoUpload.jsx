@@ -1,21 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { uploadVideo, submitTransaction } from '../services/api';
 import { getWalletAddress, autoConnectWallet, disconnectWallet } from '../services/wallet';
+import { signTransaction } from '@stellar/freighter-api';
 import './VideoUpload.css';
 
 const VideoUpload = () => {
   const [walletAddress, setWalletAddress] = useState(null);
   const [videoUrl, setVideoUrl] = useState('');
+  const [videoFile, setVideoFile] = useState(null);
   const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [error, setError] = useState(null);
   const [connecting, setConnecting] = useState(false);
 
-  const NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
-
   useEffect(() => {
-    // Sayfa yüklendiğinde otomatik bağlanmayı dene
     checkConnection();
   }, []);
 
@@ -33,7 +32,6 @@ const VideoUpload = () => {
   const handleConnect = async () => {
     setConnecting(true);
     setError(null);
-    
     try {
       const address = await getWalletAddress();
       setWalletAddress(address);
@@ -51,13 +49,13 @@ const VideoUpload = () => {
   };
 
   const handleUpload = async () => {
-    if (!videoUrl.trim()) {
-      setError('Lütfen bir video linki girin.');
+    if (!walletAddress) {
+      setError('Lütfen önce cüzdanınıza bağlanın.');
       return;
     }
 
-    if (!walletAddress) {
-      setError('Lütfen önce cüzdanınıza bağlanın.');
+    if (!videoUrl.trim() && !videoFile) {
+      setError('Video URL veya video dosyası seçmelisiniz.');
       return;
     }
 
@@ -66,30 +64,44 @@ const VideoUpload = () => {
     setUploadResult(null);
 
     try {
-      // 1. Video'yu yükle ve XDR al
-      const uploadData = await uploadVideo(walletAddress, videoUrl, fullName || null);
+      let uploadData;
+
+      // -----------  DOSYA YÜKLEME  -----------
+      if (videoFile) {
+        const formData = new FormData();
+        formData.append("wallet_address", walletAddress);
+        formData.append("video_file", videoFile);
+        if (fullName.trim()) formData.append("full_name", fullName);
+
+        uploadData = await uploadVideo(formData, true);
+
+      // -----------  URL YÜKLEME  -----------
+      } else {
+        uploadData = await uploadVideo(walletAddress, videoUrl, fullName);
+      }
+
       setUploadResult(uploadData);
 
-      // 2. XDR'ı Freighter ile imzala
-      const { signTransaction } = await import('@stellar/freighter-api');
+      // ----------- XDR İMZALAMA -----------
       const signedXdr = await signTransaction(uploadData.xdr_for_signing, {
         network: 'testnet',
         accountToSign: walletAddress
       });
 
-      // 3. İmzalanmış transaction'ı gönder
+      // ----------- ZİNCİRE GÖNDERME ---------
       const submitData = await submitTransaction(uploadData.video_id, signedXdr);
 
       setUploadResult({
         ...uploadData,
         ...submitData,
         signed: true,
-        video_url: videoUrl,
+        video_url: videoUrl || uploadData.video_url,
+        file_name: videoFile ? videoFile.name : null,
         owner_wallet: walletAddress
       });
 
     } catch (err) {
-      if (err.message && err.message.includes('User rejected')) {
+      if (err.message?.includes('User rejected')) {
         setError('İşlem kullanıcı tarafından reddedildi.');
       } else {
         setError(err.response?.data?.detail || err.message || 'Bir hata oluştu.');
@@ -103,9 +115,10 @@ const VideoUpload = () => {
     <div className="video-upload">
       <h2>Video Yükle</h2>
       <p className="description">
-        Freighter cüzdanınızla giriş yapın ve video URL'inizi yükleyerek sahipliğinizi zincire kaydedin.
+        Freighter cüzdanınızla giriş yapın ve video URL veya dosyası yükleyerek sahipliğinizi zincire kaydedin.
       </p>
 
+      {/* ------------ CÜZDAN BAĞLANTISI ------------ */}
       {!walletAddress ? (
         <div className="connect-section">
           <button
@@ -127,7 +140,10 @@ const VideoUpload = () => {
             </button>
           </div>
 
+          {/* ------------ FORM ------------ */}
           <div className="upload-form">
+
+            {/* AD SOYAD */}
             <div className="form-group">
               <label htmlFor="fullName">Ad Soyad (Opsiyonel)</label>
               <input
@@ -140,8 +156,24 @@ const VideoUpload = () => {
               />
             </div>
 
+            {/* DOSYA YÜKLEME */}
             <div className="form-group">
-              <label htmlFor="videoUrl">Video URL</label>
+              <label htmlFor="videoFile">Video Dosyası (Opsiyonel)</label>
+              <input
+                id="videoFile"
+                type="file"
+                accept="video/*"
+                onChange={(e) => setVideoFile(e.target.files[0])}
+                className="form-input"
+              />
+              {videoFile && (
+                <p className="selected-file">Seçilen dosya: {videoFile.name}</p>
+              )}
+            </div>
+
+            {/* URL YÜKLEME */}
+            <div className="form-group">
+              <label htmlFor="videoUrl">Video URL (Opsiyonel)</label>
               <input
                 id="videoUrl"
                 type="text"
@@ -152,6 +184,7 @@ const VideoUpload = () => {
               />
             </div>
 
+            {/* YÜKLEME BUTONU */}
             <button
               onClick={handleUpload}
               disabled={loading}
@@ -163,38 +196,48 @@ const VideoUpload = () => {
         </div>
       )}
 
+      {/* ------------ HATA ------------ */}
       {error && (
-        <div className="error-message">
-          {error}
-        </div>
+        <div className="error-message">{error}</div>
       )}
 
+      {/* ------------ SONUÇ ------------ */}
       {uploadResult && (
         <div className={`result-container ${uploadResult.signed ? 'success' : 'pending'}`}>
           <h3>
-            {uploadResult.signed ? '✓ Video Başarıyla Zincire Kaydedildi' : '⚠ İşlem Hazır, İmzalanıyor...'}
+            {uploadResult.signed ? '✓ Video Başarıyla Zincire Kaydedildi' : '⚠ İmzalanıyor...'}
           </h3>
-          
+
           {uploadResult.signed ? (
             <div className="success-details">
               <p className="success-message">{uploadResult.message}</p>
-              <div className="detail-item">
-                <strong>Video URL:</strong> {uploadResult.video_url}
-              </div>
+
+              {uploadResult.video_url && (
+                <div className="detail-item">
+                  <strong>Video URL:</strong> {uploadResult.video_url}
+                </div>
+              )}
+
+              {uploadResult.file_name && (
+                <div className="detail-item">
+                  <strong>Dosya:</strong> {uploadResult.file_name}
+                </div>
+              )}
+
               <div className="detail-item">
                 <strong>Transaction Hash:</strong>
                 <span className="tx-hash">{uploadResult.tx_hash}</span>
               </div>
+
               <div className="detail-item">
-                <strong>Cüzdan Adresi:</strong> {uploadResult.owner_wallet}
+                <strong>Cüzdan:</strong> {uploadResult.owner_wallet}
               </div>
             </div>
           ) : (
             <div className="pending-details">
               <p>İşlem hazırlandı. Freighter ile imzalamak için bekleniyor...</p>
               <div className="detail-item">
-                <strong>URL Hash:</strong> {uploadResult.url_hash}
-              </div>
+                <strong>URL Hash:</strong> {uploadResult.url_hash}</div>
             </div>
           )}
         </div>
@@ -204,4 +247,3 @@ const VideoUpload = () => {
 };
 
 export default VideoUpload;
-

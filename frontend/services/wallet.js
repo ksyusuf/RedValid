@@ -1,84 +1,98 @@
-import { retrievePublicKey } from '@stellar/freighter-api';
+import { isConnected, requestAccess, getAddress } from "@stellar/freighter-api";
 
 /**
- * Freighter API'nin kullanılabilir olup olmadığını kontrol eder
- * @returns {Promise<boolean>}
+ * Cüzdan bağlantısını kontrol eder
+ * @returns {Promise<string|null>} Başarılıysa cüzdan adresi, değilse null
  */
-export const checkFreighterAvailable = async () => {
+export async function checkWalletConnection() {
   try {
-    // Freighter API'nin mevcut olup olmadığını kontrol et
-    if (typeof window !== 'undefined' && window.freighter) {
-      return true;
+    const connected = await isConnected();
+    if (connected) {
+      const addressResult = await getAddress();
+      
+      // Farklı response formatlarını destekle
+      let walletAddress = null;
+      
+      if (typeof addressResult === 'string') {
+        // String olarak gelirse
+        walletAddress = addressResult;
+      } else if (addressResult && typeof addressResult === 'object' && 'address' in addressResult) {
+        // Object olarak gelirse ve address property'si varsa
+        walletAddress = addressResult.address;
+      }
+      
+      if (walletAddress && typeof walletAddress === 'string' && walletAddress.startsWith('G')) {
+        return walletAddress;
+      }
     }
-    return false;
+    
+    return null;
   } catch (error) {
-    return false;
+    console.log('Cüzdan bağlantı kontrolü başarısız:', error);
+    return null;
   }
-};
+}
 
 /**
- * Cüzdan adresini getirir (bağlanır)
- * @returns {Promise<string|null>} Public key veya null
+ * Cüzdan adresini alır (bağlantı yoksa hata fırlatır)
+ * @returns {Promise<string>} Cüzdan adresi
  */
-export const getWalletAddress = async () => {
-  const isInstalled = await checkFreighterInstalled();
-  if (!isInstalled) {
-    throw new Error('Freighter cüzdanı bulunamadı. Lütfen Chrome uzantılarından Freighter\'ı yükleyin ve sayfayı yenileyin.');
-  }
-
+export async function getWalletAddress() {
   try {
-    // Önce aktif oturum var mı kontrol et
-    const publicKey = await retrievePublicKey();
-    if (publicKey) {
-      localStorage.setItem('isWalletConnected', 'true');
-      localStorage.setItem('walletAddress', publicKey);
-      return publicKey;
+    const connected = await isConnected();
+    if (!connected) {
+      throw new Error("Freighter cüzdanı bağlı değil. Lütfen önce cüzdanınızı bağlayın.");
     }
+    
+    const addressResult = await requestAccess();
+    
+    // requestAccess başarılı olduğunda { address: string } döndürür
+    if (addressResult && typeof addressResult === 'object' && 'address' in addressResult) {
+      return addressResult.address;
+    }
+    
+    // Eski format kontrolü
+    if (typeof addressResult === 'string') {
+      if (addressResult === "true") {
+        const addressFromGet = await getAddress();
+        if (!addressFromGet || typeof addressFromGet !== 'string') {
+          throw new Error("Cüzdan adresi alınamadı.");
+        }
+        return addressFromGet;
+      } else if (/^G[A-Z2-7]{55}$/.test(addressResult)) {
+        // Direkt adres döndürülmüşse
+        return addressResult;
+      }
+    }
+    
+    throw new Error("Cüzdan bağlantısı iptal edildi veya onay verilmedi.");
   } catch (error) {
-    if (error.message && error.message.includes('User rejected')) {
-      throw new Error('Cüzdan bağlantısı kullanıcı tarafından reddedildi.');
-    } else if (error.message && error.message.includes('not connected')) {
-      throw new Error('Freighter\'da aktif oturum bulunamadı. Lütfen Freighter uzantısını açın ve oturum açın.');
+    if (error instanceof Error) {
+      throw error;
     }
-    throw new Error('Cüzdan bağlantısı başarısız. Freighter uzantısının açık ve oturumun aktif olduğundan emin olun.');
+    throw new Error("Cüzdan bağlantısı kurulamadı.");
   }
-
-  return null;
-};
+}
 
 /**
- * Otomatik bağlanmayı dener - Freighter API ile sessiz bağlantı
- * @returns {Promise<string|null>} Public key veya null
+ * Otomatik olarak cüzdana bağlanmayı dener
+ * @returns {Promise<string|null>} Başarılıysa cüzdan adresi, değilse null
  */
-export const autoConnectWallet = async () => {
+export async function autoConnectWallet() {
   try {
-    // Freighter API mevcut mu kontrol et
-    const isAvailable = await checkFreighterAvailable();
-    if (!isAvailable) {
-      return null; // Sessizce başarısız ol, hata gösterme
-    }
-
-    // Sessizce public key almayı dene (kullanıcı etkileşimi olmadan)
-    const publicKey = await retrievePublicKey();
-    if (publicKey) {
-      localStorage.setItem('isWalletConnected', 'true');
-      localStorage.setItem('walletAddress', publicKey);
-      return publicKey;
-    }
+    const address = await checkWalletConnection();
+    return address;
   } catch (error) {
-    // Otomatik bağlantı başarısız olursa sessizce geç
-    localStorage.removeItem('isWalletConnected');
-    localStorage.removeItem('walletAddress');
+    console.log('Otomatik bağlantı başarısız:', error);
+    return null;
   }
-
-  return null;
-};
+}
 
 /**
- * Bağlantıyı keser
+ * Cüzdandan bağlantıyı keser
  */
-export const disconnectWallet = () => {
-  localStorage.removeItem('isWalletConnected');
-  localStorage.removeItem('walletAddress');
-};
-
+export function disconnectWallet() {
+  // Freighter API'de direkt disconnect fonksiyonu yok
+  // Bu fonksiyon sadece state'i temizlemek için kullanılır
+  console.log('Cüzdan bağlantısı kesildi');
+} 
